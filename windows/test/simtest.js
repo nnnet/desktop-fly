@@ -105,7 +105,50 @@ sim.consumeGF();
 console.log(`click probes: GF cluster -> spike ${gfStim ? 'yes' : 'NO'}, `
   + `DNg11 cluster -> groom rate ${f(groomStim, 0)} Hz`);
 
-const pass = gfSpont === 0 && gfLoom > 0 && walkOn > 0 && gfStim && siestaPct > 3;
+// Phase 7: silence() — the trainer "punish" half. The silenced population
+// must drop well below its spontaneous rate while the stim is active.
+sim.consumeGF();
+// Bring DNg11 up to a stable rate first by stimulating it for a bit.
+sim.stimulate(sim.groom, 0.2, 500);
+for (let i = 0; i < 500; i++) sim.step(1);
+const groomBefore = sim.rateGroom;
+sim.silence(sim.groom, 500);
+let groomDuring = 0;
+let groomSamples = 0;
+for (let i = 0; i < 500; i++) {
+  sim.step(1);
+  if (i >= 100) { groomDuring += sim.rateGroom; groomSamples++; }   // skip the silence ramp
+}
+const groomDuringMean = groomDuring / Math.max(1, groomSamples);
+const silenceWorks = groomDuringMean < groomBefore * 0.5;
+console.log(`silence groom 500ms: ${f(groomBefore, 0)} -> ${f(groomDuringMean, 0)} Hz`
+  + (silenceWorks ? '' : ' (silence did not suppress the population)'));
+
+// Phase 8: Hebbian plasticity. A new sim with the same circuit, then 30 s of
+// strong DNp09 stimulation. At eta=1e-3 (10x the default) we want at least
+// one edge weight to grow. This is the trainer's whole point: repeated
+// pairing grows the synapse that delivered the reward.
+const sim2 = new LIFSim(data.circuit, null);
+const base = sim2.exportWeights();
+let maxDelta = 0;
+sim2.enablePlasticity({ eta: 1e-3, alpha: 0, stepMs: 100 });   // disable decay to isolate LTP
+for (let ms = 0; ms < 30000; ms++) {
+  if (sim2.fwd.length) sim2.stimulate(sim2.fwd, 0.3, 50);     // 50 ms pulse every 1 ms = 1.5 s on per s
+  sim2.step(1);
+}
+const trained = sim2.exportWeights();
+for (let k = 0; k < base.length; k++) {
+  if (base[k] !== 0) {
+    const d = trained[k] - base[k];
+    if (d > maxDelta) maxDelta = d;
+  }
+}
+const plasticWorks = maxDelta > 0;
+console.log(`plasticity 30s (eta=1e-3): max dW ${maxDelta.toExponential(2)}`
+  + (plasticWorks ? '' : ' (no edge grew — pair-based LTP did not fire)'));
+
+const pass = gfSpont === 0 && gfLoom > 0 && walkOn > 0 && gfStim && siestaPct > 3
+  && silenceWorks && plasticWorks;
 console.log(pass
   ? 'PASS: GF silent at rest, fires on loom; locomotor drive fluctuates; stim works; siesta alive'
   : 'FAIL: tune weights/noise');

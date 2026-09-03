@@ -200,6 +200,49 @@ export class LIFSim {
     if (this.pendingStims.length > 8) this.pendingStims.shift();
   }
 
+  // Trainer / "punish" half of optogenetics: zero the synaptic drive into
+  // and out of `indices` for `durationMs`. The membrane voltage is unchanged,
+  // so a silenced neuron still receives baseline current and Poisson noise
+  // but cannot pass spikes downstream. Used by Phase 1 of the trainer to
+  // take a behaviour off the board temporarily (e.g. "no GF escapes").
+  silence(indices, durationMs) {
+    if (!indices || !indices.length) return;
+    this.pendingStims.push({ idx: indices, strength: 0, durationMs, untilMs: 0, silent: true });
+    if (this.pendingStims.length > 8) this.pendingStims.shift();
+  }
+
+  // Hebbian plasticity: per-active-edge weight update. eta = LTP rate
+  // (typ. 1e-4), alpha = decay rate (typ. 1e-7), stepMs = how often to apply
+  // (typ. 100 ms; we don't need 1 ms resolution and 100ms saves a factor of
+  // 100 in CPU). Returns the number of edges touched. Backed by a clone
+  // of the original weights for clamping; this.w is mutated in place.
+  enablePlasticity(opts = {}) {
+    this.plasticEta = Number.isFinite(opts.eta) ? opts.eta : 1e-4;
+    this.plasticAlpha = Number.isFinite(opts.alpha) ? opts.alpha : 1e-7;
+    this.plasticStepMs = Number.isFinite(opts.stepMs) ? opts.stepMs : 100;
+    this.plasticMinRateHz = Number.isFinite(opts.minRateHz) ? opts.minRateHz : 1;
+    this.plasticW0 = new Float32Array(this.w);   // initial weights for clamp
+    this.plasticEnabled = true;
+    this.plasticLastMs = 0;
+    this.plasticEdgesTouched = 0;
+  }
+  disablePlasticity() { this.plasticEnabled = false; }
+  resetPlasticity() {
+    if (this.plasticW0) this.w.set(this.plasticW0);
+    this.plasticEdgesTouched = 0;
+  }
+  // Called by main process after each step (or each save tick) to snapshot
+  // the current weight matrix as a Float32Array (length = edges.length).
+  // Returns a fresh copy, not a view, so the caller can serialise freely.
+  exportWeights() {
+    return new Float32Array(this.w);
+  }
+  importWeights(arr) {
+    if (!arr || arr.length !== this.w.length) return false;
+    this.w.set(arr);
+    return true;
+  }
+
   consumeGF() { const s = this.gfLatch; this.gfLatch = false; return s; }
 
   step(ms) {
@@ -254,7 +297,12 @@ export class LIFSim {
       // brain-window click stimulation
       for (const s of this.activeStims) {
         if (this.simMs >= s.untilMs) continue;
-        for (const i of s.idx) v[i] += s.strength;
+        if (s.silent) {
+          // trainer "punish" channel: clamp silenced neurons below threshold
+          for (const i of s.idx) v[i] = Math.min(v[i], -1.2);
+        } else {
+          for (const i of s.idx) v[i] += s.strength;
+        }
       }
 
       // deliver delayed inhibition scheduled for this millisecond
@@ -309,11 +357,59 @@ export class LIFSim {
       this.rateEscW += (cW * 1000 / Math.max(1, this.escw.length) - this.rateEscW) * a;
       this.ratePop += (nSpiked * 1000 / Math.max(1, n) - this.ratePop) * a;
 
+      // sampled list of "this step fired" neurons. The brain window needs
+      // only a sparse feed, so under heavy activity we stride; plasticity
+      // and rate EMAs read the full `spiked` array directly, so it does
+      // not need to be exhaustive.
       if (this.spikeBus) {
         const stride = Math.max(1, Math.floor(nSpiked / 12));   // sample under heavy activity
         for (let i = 0; i < nSpiked; i += stride) {
           spikedNow.push({ neuron: spiked[i], isGF: this.roleCode[spiked[i]] === 8 });
         }
+      }
+      // Pair-based LTP: walk every fired neuron's outgoing edges and grow
+      // those that landed on another fired neuron this step. This runs
+      // regardless of whether a SpikeBus is attached.
+      if (this.plasticEnabled) {
+        const fired = new Uint8Array(n);
+        for (let s2 = 0; s2 < nSpiked; s2++) fired[spiked[s2]] = 1;
+        const eta = this.plasticEta, alpha = this.plasticAlpha, w0 = this.plasticW0;
+        // Homeostatic decay on every nonzero edge.
+        if (alpha > 0) {
+          const decay = 1 - alpha;   // dt = 1 ms per inner-loop step
+          for (let k = 0; k < this.w.length; k++) {
+            if (this.w[k] !== 0) this.w[k] *= decay;
+          }
+        }
+        // Pair-based LTP: edges (i -> j) where both i and j fired this step
+        // grow by `eta`. Excitatory edges (w0 > 0) only; silenced (w <= 0)
+        // are skipped.
+        let touched = 0;
+        for (let s2 = 0; s2 < nSpiked; s2++) {
+          const pre = spiked[s2];
+          const end = this.rowStart[pre + 1];
+          for (let k = this.rowStart[pre]; k < end; k++) {
+            if (this.w[k] <= 0) continue;     // silence() killed it
+            const post = this.colIdx[k];
+            if (fired[post]) {
+              this.w[k] += eta;
+              touched++;
+            }
+          }
+        }
+        // Clamp to [0, 2*w0]. Inhibitory edges (w0 < 0) stay non-positive.
+        for (let k = 0; k < this.w.length; k++) {
+          const w0k = w0[k];
+          if (w0k >= 0) {
+            if (this.w[k] < 0) this.w[k] = 0;
+            else if (this.w[k] > 2 * w0k) this.w[k] = 2 * w0k;
+          } else {
+            if (this.w[k] > 0) this.w[k] = 0;
+            else if (this.w[k] < 2 * w0k) this.w[k] = 2 * w0k;
+          }
+        }
+        this.plasticEdgesTouched += touched;
+        this.plasticLastMs = this.simMs;
       }
     }
     if (this.spikeBus) this.spikeBus.push(spikedNow);

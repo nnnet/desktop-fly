@@ -65,6 +65,15 @@ const cfgWalkSpeed  = numFlag('walk-speed',  'FLY_WALK_SPEED',  1.0);
 const cfgEscapeRate = numFlag('escape-rate', 'FLY_ESCAPE_RATE', 1.0);
 const cfgIdleMs     = numFlag('idle-ms',     'FLY_IDLE_MS',     90_000);
 
+// Hebbian plasticity toggles. plasticity=on enables LTP/LTD updates on every
+// sim step; the rates are the canonical erojasoficial fly-brain defaults
+// (eta=1e-4 LTP, alpha=1e-7 homeostatic decay). Persisted weights are loaded
+// from app.getPath('userData')/weights.json on startup if present, and saved
+// every PLASTIC_SAVE_MS (or on quit).
+const cfgPlasticity  = argValue('plasticity') || process.env.FLY_PLASTICITY || 'off';
+const cfgPlasticEta  = numFlag('plasticity-eta',  'FLY_PLASTIC_ETA',  1e-4);
+const cfgPlasticAlpha = numFlag('plasticity-alpha', 'FLY_PLASTIC_ALPHA', 1e-7);
+
 // ----- Pure helpers (exported for tests) -----
 
 /**
@@ -92,6 +101,8 @@ export function planOverlays(allDisplays, activeDisplayId) {
  *   onAddFly: () => void,
  *   onRemoveFly: () => void,
  *   onScare: () => void,
+ *   onTrainer: (target: string, dir: 1 | -1) => void,
+ *   onPlasticity: (action: 'enable' | 'disable' | 'reset') => void,
  *   onQuit: () => void,
  *   activeDisplayId: number,
  *   displayCount: number,
@@ -114,6 +125,20 @@ export function buildTrayMenu(ctx) {
     { label: 'Add Fly', click: ctx.onAddFly },
     { label: 'Remove Fly', click: ctx.onRemoveFly },
     { label: 'Scare Flies', click: ctx.onScare },
+    {
+      label: 'Trainer',
+      submenu: [
+        { label: 'Reward walk (DNp09)',  click: () => ctx.onTrainer('walk', +1) },
+        { label: 'Reward groom (DNg11)', click: () => ctx.onTrainer('groom', +1) },
+        { label: 'Punish escape (GF)',   click: () => ctx.onTrainer('escape', -1) },
+        { label: 'Punish backward (MDN)', click: () => ctx.onTrainer('backward', -1) },
+        { type: 'separator' },
+        { label: 'Enable Hebbian plasticity',
+          click: () => ctx.onPlasticity('enable') },
+        { label: 'Disable plasticity',  click: () => ctx.onPlasticity('disable') },
+        { label: 'Reset weights',       click: () => ctx.onPlasticity('reset') },
+      ],
+    },
     { type: 'separator' },
     { label: 'Quit', click: ctx.onQuit },
   ]);
@@ -202,13 +227,27 @@ export function createBrainWindow(primary, linuxDir) {
 // `api.getBrainData()` and the scene stays empty (white PNG).
 let brainData = null;       // FlyWire data; null on disk-miss → legacy fly
 const idleSinceMs = () => powerMonitor.getSystemIdleTime() * 1000;
+
+// Each overlay is a per-monitor BrowserWindow whose render scene is centered
+// on that monitor. To get the cursor into the same scene space, subtract the
+// monitor center and flip Y (overlay.js uses +Y up). Done per window so the
+// active display's render sees its own coords and inactive displays still
+// get a value (their fly is hidden but the math stays consistent if shown).
+function cursorInScene(windowBounds) {
+  const c = screen.getCursorScreenPoint();
+  return {
+    x: c.x - (windowBounds.x + windowBounds.width / 2),
+    y: (windowBounds.y + windowBounds.height / 2) - c.y,
+  };
+}
+
 function pushAmbientToAll() {
   // The renderer uses ambient for: mouse pos, typing-level, sleep, tempo, activity.
   // Linux gives us system-idle time; we proxy it as typingLevel=0, sleepy=after idleMs.
   const idle = idleSinceMs();
   const sleepy = idle > cfgIdleMs;
-  const ambient = {
-    mouse: { x: 0, y: 0 },            // TODO: track real cursor (xdotool getmouselocation)
+  // Window-level fields that don't depend on the per-display transform.
+  const baseFields = {
     typing: 0,                        // TODO: hook xkb / libinput key events
     sleepy,
     // tempo carries the user-controllable activity multiplier (default 1.0);
@@ -218,7 +257,11 @@ function pushAmbientToAll() {
     escapeRateMul: cfgEscapeRate,
     idleMs: cfgIdleMs,
   };
-  for (const win of windows.values()) win.webContents.send('ambient', ambient);
+  for (const [id, win] of windows) {
+    if (win.isDestroyed()) continue;
+    const ambient = { ...baseFields, mouse: cursorInScene(win.getBounds()) };
+    win.webContents.send('ambient', ambient);
+  }
 }
 setInterval(pushAmbientToAll, 500);
 
@@ -345,6 +388,16 @@ function refreshTray() {
     onAddFly: () => broadcastCmd({ name: 'addFly' }),
     onRemoveFly: () => broadcastCmd({ name: 'removeFly' }),
     onScare: () => broadcastCmd({ name: 'scareAll' }),
+    onTrainer: (target, dir) => broadcastCmd({ name: dir > 0 ? 'reward' : 'punish', target }),
+    onPlasticity: (action) => {
+      if (action === 'enable') {
+        broadcastCmd({ name: 'enablePlasticity', eta: cfgPlasticEta, alpha: cfgPlasticAlpha });
+      } else if (action === 'disable') {
+        broadcastCmd({ name: 'disablePlasticity' });
+      } else if (action === 'reset') {
+        broadcastCmd({ name: 'resetTraining' });
+      }
+    },
     onQuit: () => { app.isQuitting = true; app.quit(); },
     activeDisplayId,
     displayCount: allDisplays.length,

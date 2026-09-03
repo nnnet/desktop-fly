@@ -142,6 +142,26 @@ function stimulateGroup(name) {
   sim.stimulate(sim[field], strength, durationMs);
 }
 
+// Trainer: positive direction = stimulate the named population, negative =
+// silence it. Both use sim.stimulate/silence with fixed, short parameters
+// so each click is a single operant-conditioning pulse, not a sustained
+// effect. The "weight" of a single click is small on purpose; long-term
+// learning happens through Hebbian plasticity over many paired events.
+const TRAINER_GROUPS = {
+  walk: 'fwd',       // DNp09 — reward walking
+  groom: 'groom',    // DNg11 — reward grooming
+  escape: 'gf',      // DNp01 — punish spontaneous escape
+  backward: 'mdn',   // MDN   — punish backward walk
+  wings: 'escw',     // wing DNs
+};
+function trainerAction(name, dir) {
+  if (!sim) return;
+  const field = TRAINER_GROUPS[name];
+  if (!field || !sim[field] || !sim[field].length) return;
+  if (dir > 0) sim.stimulate(sim[field], 0.4, 80);
+  else sim.silence(sim[field], 250);
+}
+
 // tray command: nudge the fly across to another monitor
 function flyToNextDisplay() {
   const fly = flies[0];
@@ -329,6 +349,13 @@ api.onCommand((c) => {
     case 'scareAll': scareAll(); break;
     case 'flyToNextDisplay': flyToNextDisplay(); break;
     case 'stim': stimulateGroup(c.group); break;
+    case 'reward': trainerAction(c.target, +1); break;
+    case 'punish': trainerAction(c.target, -1); break;
+    case 'resetTraining': if (sim) sim.resetPlasticity(); break;
+    case 'enablePlasticity': if (sim) {
+      sim.enablePlasticity({ eta: c.eta, alpha: c.alpha, stepMs: c.stepMs });
+    } break;
+    case 'disablePlasticity': if (sim) sim.disablePlasticity(); break;
     default: break;
   }
 });
