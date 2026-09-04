@@ -18,8 +18,8 @@
 
 import { app, BrowserWindow, Tray, Menu, screen, ipcMain, nativeImage, powerMonitor } from 'electron';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-import { existsSync } from 'node:fs';
+import { dirname, resolve, join } from 'node:path';
+import { existsSync, promises as fsp, unlinkSync } from 'node:fs';
 import { sense } from './src/os.js';
 import { loadBrainData } from './src/data.js';
 
@@ -312,9 +312,8 @@ ipcMain.on('stimulate', (_e, req) => {
 
 // Hebbian food-memories persistence. userData on Linux lives under
 // ~/.config/<appname>/ so a `rm -rf ~/.config/desktop-fly` is the
-// nuclear option.
-import { promises as fsp, existsSync, unlinkSync } from 'fs';
-import { join } from 'path';
+// nuclear option. (fs/path imports are at the top of the file with
+// the rest — ESM forbids redeclaration.)
 const memoriesFile = () => join(app.getPath('userData'), 'food-memories.json');
 
 ipcMain.handle('memories:load', async () => {
