@@ -449,11 +449,17 @@ export class Fly {
     this.liveArousal = 0;
     this.liveWing = 0;
 
-    // Satiety: per-fly hunger. 0 = starving, 1 = full. Decays toward 0 with
-    // tau=60s. Eating a sugar zone adds 0.4 (clamped). Below
+    // Satiety: per-fly hunger. 0 = starving, 1 = full. Decays toward 0
+    // with tau=60s. Eating a sugar zone adds 0.4 (clamped). Below
     // SUGAR_THRESHOLD the renderer zeros the effective foodAttract.
-    // Spec: fly-satiety (5 Requirements).
-    this.sugarLevel = 0.2;
+    // Spec: fly-satiety (5 Requirements). The initial value MUST be
+    // strictly above SUGAR_THRESHOLD (= 0.2) so a fresh fly is
+    // actually hungry in its first second — sugarLevel=0.2 decays
+    // below 0.2 in one frame and the gate then zeroes foodAttract
+    // for the rest of the session. Use 1.0 (full demo: fly hunts
+    // sugar until it eats a few zones, then gets satiated and
+    // goes hungry again as the level decays).
+    this.sugarLevel = 1.0;
     // Transient behaviour tags (eaten / courted). Set by the renderer when
     // attract reports foodReached / mateClose. Cleared after EAT_DUR /
     // COURT_DUR seconds — the brain state line in the brain window

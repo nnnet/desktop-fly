@@ -345,13 +345,21 @@ function stepZoneMotion(z, dt, fly) {
 function drawZones(t, dt, fly) {
   for (const z of zones) {
     stepZoneMotion(z, dt, fly);
+    // Push the zone's logical position to the mesh every frame —
+    // sugar and predator used to only set their mesh position at
+    // spawn time, which made them appear stuck even though the
+    // stepZoneMotion was updating z.x/z.y correctly. Spec:
+    // fly-zone-wander "Every zone has a target and a repick loop".
+    const zPos = (z.kind === 'sugar')    ? 0.4
+               : (z.kind === 'mate')     ? 0.5
+               :                            0.45;
+    z.mesh.position.set(z.x, z.y, zPos);
+    if (z.glow) z.glow.position.set(z.x, z.y, 0.3);
     if (z.kind === 'sugar') {
       // gentle pulse to draw the eye
       const s = 1 + 0.08 * Math.sin(t * 2.5 + z.id);
       z.mesh.scale.set(s, s, 1);
     } else if (z.kind === 'mate') {
-      z.glow.position.set(z.x, z.y, 0.3);
-      z.mesh.position.set(z.x, z.y, 0.5);
       const s = 1 + 0.15 * Math.sin(t * 4 + z.id);
       z.glow.scale.set(s, s, 1);
     } else if (z.kind === 'predator') {
