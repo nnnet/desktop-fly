@@ -29,10 +29,39 @@
   }
   #state-line .tag { font-weight: 700; color: #ffd23f; }
   #state-line .rates { color: #8a96a8; font-size: 10px; }
+  /* Memory mini-panel: top-10 Hebbian weight bars under the state
+     line. Renders the most-changed edges from food-memories.json
+     so the user can see learning without opening the trainer
+     window. The panel is fixed-height and fades in only when
+     there is data to show. Spec: brain-trainer-memory-view
+     "render 20 SVG bars" (we render 10 here to keep the brain
+     window compact). */
+  #memory-panel {
+    position: fixed; left: 0; right: 0; top: 18px; max-height: 110px;
+    overflow-y: auto; padding: 4px 8px 4px 8px;
+    background: rgba(0, 0, 0, 0.45); color: #d8d8d8;
+    font: 10px "Consolas", monospace; border-bottom: 1px solid #1f2530;
+    z-index: 9; display: none;
+  }
+  #memory-panel.on { display: block; }
+  #memory-panel .placeholder { color: #8a96a8; font-style: italic;
+                              padding: 4px 0; }
+  #memory-panel .bar { display: grid; grid-template-columns: 90px 1fr 70px;
+                      align-items: center; gap: 6px; margin-bottom: 2px; }
+  #memory-panel .bar .label { color: #d8d8d8;
+                              white-space: nowrap; overflow: hidden;
+                              text-overflow: ellipsis; }
+  #memory-panel .bar .track { background: #0c0f15; border-radius: 2px;
+                              height: 10px; position: relative; overflow: hidden; }
+  #memory-panel .bar .fill { position: absolute; top: 0; bottom: 0; }
+  #memory-panel .bar .fill.ltp { background: #4caf50; }
+  #memory-panel .bar .fill.ltd { background: #ef5350; }
+  #memory-panel .bar .dW { text-align: right; color: #b8d0ff; }
 </style>
 </head>
 <body>
 <div id="state-line"><span class="tag">—</span><span class="rates"></span></div>
+<div id="memory-panel"></div>
 <div id="label"></div>
 <script type="module" src="./brain.js"></script>
 </body>

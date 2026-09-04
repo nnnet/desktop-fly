@@ -742,10 +742,28 @@ api.onCommand((c) => {
       break;
     }
     case 'spawnPredator': {
-      // Same placement rule as sugar; the predator is a stationary threat
-      // the user drops to challenge the fly.
-      const hw = bounds.width / 2 - 80, hh = bounds.height / 2 - 80;
-      spawnPredator(rnd(-hw, hw), rnd(-hh, hh));
+      // Spawn the predator 200-400 pt from the fly at a random angle.
+      // This matches the predator's ambush+sprint target range
+      // (see windows/src/zone-motion.js predatorStep) so the
+      // sprint lands near the fly on the first attempt. Before
+      // this change the predator was placed anywhere on the
+      // display; the user reported "predator was set to
+      // chase the fly's spawn position but the fly had moved
+      // before the sprint started" — placing the predator
+      // close to the live fly position makes the contact
+      // happen within one rest+sprint cycle.
+      const fly0p = flies[0];
+      const hwp = bounds.width / 2 - 80, hhp = bounds.height / 2 - 80;
+      if (fly0p) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = 200 + Math.random() * 200;
+        spawnPredator(
+          Math.max(-hwp, Math.min(hwp, fly0p.pos.x + dist * Math.cos(ang))),
+          Math.max(-hhp, Math.min(hhp, fly0p.pos.y + dist * Math.sin(ang))),
+        );
+      } else {
+        spawnPredator(rnd(-hwp, hwp), rnd(-hhp, hhp));
+      }
       break;
     }
     case 'spawnMate': spawnMate(rnd(-bounds.width / 4, bounds.width / 4),
