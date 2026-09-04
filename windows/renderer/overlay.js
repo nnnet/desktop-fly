@@ -124,6 +124,10 @@ function addFly() {
   fly.screens = screens;
   scene.add(fly.node);
   flies.push(fly);
+  console.info(`[fly] addFly pos=(${p.x.toFixed(0)}, ${p.y.toFixed(0)})`
+    + ` bounds=${bounds.width}x${bounds.height}`
+    + ` screens=${screens ? screens.length : 0}`
+    + ` scene.children=${scene.children.length}`);
 }
 
 function onAnyScreen(x, y, inset = 0) {
@@ -527,6 +531,8 @@ api.onRetarget((size) => {
   camera.updateProjectionMatrix();
   renderer.setSize(bounds.width, bounds.height);
   fitShadowCamera();
+  console.info(`[fly] retarget bounds=${bounds.width}x${bounds.height}`
+    + ` screens=${screens ? screens.length : 0} flies=${flies.length}`);
   // keep flies on a real screen after the desktop changed shape
   for (const fly of flies) {
     fly.ledge = null;
