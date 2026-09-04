@@ -1,0 +1,34 @@
+openspec/changes/fly-satiety-predator-brain-trainer-stats/specs/brain-trainer-memory-view/spec.md
+  s_c80a415793d991::t_7bd66eca5a2906 1-76
+openspec/changes/fly-satiety-predator-brain-trainer-stats/specs/brain-state-readout/spec.md
+  s_c80a415793d991::t_fe9a7ea3a29edc 1-71
+openspec/changes/fly-satiety-predator-brain-trainer-stats/proposal.md
+  s_c80a415793d991::t_cb90577357471d 1-90
+openspec/changes/fly-satiety-predator-brain-trainer-stats/specs/fly-predator-zones/spec.md
+  s_c80a415793d991::t_e3378c468e5a34 1-83
+openspec/changes/fly-satiety-predator-brain-trainer-stats/tasks.md
+  s_c80a415793d991::t_a4b2b4b1cc9802 1-9,14-16,19-21,26-28,32-34,39-41,47-49,55-57,61-63
+  s_c80a415793d991::t_4ac1a13fb7f0ae 10-13,17-18,22-25,29-31,35-38,42-46,50-54,58-60,64-67
+openspec/changes/fly-satiety-predator-brain-trainer-stats/.openspec.yaml
+  s_c80a415793d991::t_967616f3ac813e 1-2
+openspec/changes/fly-satiety-predator-brain-trainer-stats/specs/fly-satiety/spec.md
+  s_c80a415793d991::t_dff7f0a4771e22 1-80
+openspec/changes/fly-satiety-predator-brain-trainer-stats/design.md
+  s_c80a415793d991::t_f4cec7caf7f1a1 1-196
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "303d6c7db5f59c54a8c402be7c480e0240d3e270",
+  "prompts": {},
+  "sessions": {
+    "s_c80a415793d991": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2d902537-236e-4079-aeca-c6e315116f31",
+        "model": "OpenRouter/minimax/minimax-m3:free"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    }
+  }
+}
