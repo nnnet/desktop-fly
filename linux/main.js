@@ -279,12 +279,12 @@ let currentSize  = cfgFlySize;
  * @param {string} linuxDir
  */
 export function createBrainWindow(primary, linuxDir) {
-  // Brain window grew from 340x300 to 480x500: the 3D point cloud
-  // gets the upper 320 px; the lower 180 px is the state line +
-  // memory panel (top-10 Hebbian weight bars). Spec:
-  // brain-trainer-memory-view + brain-state-readout, sharing the
-  // same window.
-  const W = 480, H = 500;
+  // Brain window grew vertically: 340x300 -> 340x540. The 3D point
+  // cloud keeps its original 300 px square (the brain itself is
+  // unchanged); the lower 240 px holds the state line + memory
+  // panel (top-10 Hebbian weight bars). Spec: brain-trainer-memory-
+  // view + brain-state-readout, sharing the same window.
+  const W = 340, H = 540;
   const win = new BrowserWindow({
     x: primary.workArea.x + primary.workArea.width - W - 18,
     y: primary.workArea.y + primary.workArea.height - H - 18,

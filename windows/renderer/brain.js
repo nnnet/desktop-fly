@@ -170,12 +170,20 @@ const group = new THREE.Group();
 group.rotation.x = -0.15;
 scene.add(group);
 
-const camera = new THREE.PerspectiveCamera(46, window.innerWidth / window.innerHeight, 1, 120);
+// The 3D brain canvas is always 340x300 (the original brain
+// window size) regardless of the overall window height. The
+// state line + memory panel sit under the canvas at top: 300
+// (see brain.html). Using clientWidth/Height on the canvas
+// element keeps the renderer correctly sized even when the
+// window is resized.
+const BRAIN_W = 340, BRAIN_H = 300;
+
+const camera = new THREE.PerspectiveCamera(46, BRAIN_W / BRAIN_H, 1, 120);
 camera.position.set(0, 0.6, 29);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
-renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setSize(BRAIN_W, BRAIN_H, false);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
@@ -431,9 +439,16 @@ canvas.addEventListener('pointerover', () => { hovering = true; idleSince = 0; }
 canvas.addEventListener('pointerleave', () => { hovering = false; dragging = false; });
 
 window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
+  // The 3D brain canvas is fixed at 340x300; the lower 240 px
+  // holds the state line + memory panel and does not affect
+  // the renderer. We still update camera.aspect in case the
+  // window is resized to a different canvas size in the
+  // future, but the canonical case is no-op.
+  const w = canvas.clientWidth || BRAIN_W;
+  const h = canvas.clientHeight || BRAIN_H;
+  camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setSize(w, h, false);
 });
 
 api.onSpikes((list) => {
