@@ -9,6 +9,7 @@ import { LIFSim, SpikeBus } from '../src/sim.js';
 import { SignalBuilder } from '../src/signals.js';
 import { Fly, SHADOWS_ENABLED, setEscapeRateMul, setTheme, setScale } from '../src/flymodel.js';
 import { zoneAttract, PREDATOR_RANGE_PT } from '../src/attract.js';
+import { pickZoneTarget, stepZoneMotion as stepZone } from '../src/zone-motion.js';
 import { clampf, rnd, lag } from '../src/util.js';
 
 const api = window.flyAPI;
@@ -109,6 +110,12 @@ const signalBuilder = new SignalBuilder();
 // has a three.js Mesh in `mesh` so we don't look it up by id per frame.
 const zones = [];
 let zoneIdSeq = 1;
+// Per-session dedup set for the contact log. Keyed by
+// `${zoneId}:${flyIndex}` so re-entering the same zone does not spam
+// the console. Cleared by clearZones() so a fresh wave of zones
+// produces a fresh round of contact logs.
+// Spec: fly-zone-contact-debug "First contact per zone per fly is logged".
+const zoneContactLogged = new Set();
 const THREE_ns = THREE;   // alias for the closure below
 
 let lastTime = null;
@@ -260,59 +267,46 @@ function injectTap(p) {
 // Mate: a slowly-moving soft glow; never consumed, just a pheromone
 // gradient. Close approach (60 pt) fires wing-extension stimulation as a
 // courtship surrogate.
-function spawnSugar(x, y) {
-  const z = { id: zoneIdSeq++, kind: 'sugar', x, y, r: 28, mesh: null, born: performance.now() };
-  z.mesh = new THREE.Mesh(
-    new THREE.CircleGeometry(z.r, 32),
-    new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.65, depthWrite: false }),
-  );
-  z.mesh.position.set(x, y, 0.4);
-  scene.add(z.mesh);
-  zones.push(z);
-  return z.id;
-}
+// Per-kind motion defaults. The repick loop in stepZoneMotion reads
+// `chaseProb` to decide whether the next target is "near the fly"
+// (heading toward it) or "uniform on the display" (wandering off).
+// Spec: fly-zone-wander.
+const ZONE_KINDS = {
+  sugar:    { speed: 30, chaseProb: 0.15, color: 0xffd23f, glow: false, segments: 32, opacity: 0.65 },
+  mate:     { speed: 20, chaseProb: 0.25, color: 0xff7ad9, glow: true,  segments: 24, opacity: 0.95 },
+  predator: { speed: 50, chaseProb: 0.40, color: 0xb8232c, glow: false, segments: 8,  opacity: 0.75 },
+};
 
-function spawnMate(x, y) {
+function spawnZone(kind, x, y) {
+  const k = ZONE_KINDS[kind];
   const z = {
-    id: zoneIdSeq++, kind: 'mate', x, y, r: 90,
-    target: { x, y },          // next destination; mate lerps toward it
-    nextHop: 0,                  // simMs when to pick a new target
+    id: zoneIdSeq++, kind, x, y, r: kind === 'sugar' ? 28 : kind === 'mate' ? 90 : 50,
+    speed: k.speed, chaseProb: k.chaseProb,
+    target: { x, y },
+    nextHopMs: performance.now() + 4000 + Math.random() * 6000,
     mesh: null, glow: null, born: performance.now(),
   };
-  z.glow = new THREE.Mesh(
-    new THREE.CircleGeometry(z.r, 48),
-    new THREE.MeshBasicMaterial({ color: 0xff7ad9, transparent: true, opacity: 0.18, depthWrite: false, blending: THREE.AdditiveBlending }),
-  );
+  if (k.glow) {
+    z.glow = new THREE.Mesh(
+      new THREE.CircleGeometry(z.r, 48),
+      new THREE.MeshBasicMaterial({ color: k.color, transparent: true, opacity: 0.18, depthWrite: false, blending: THREE.AdditiveBlending }),
+    );
+  }
   z.mesh = new THREE.Mesh(
-    new THREE.CircleGeometry(10, 24),
-    new THREE.MeshBasicMaterial({ color: 0xff7ad9, transparent: true, opacity: 0.95, depthWrite: false }),
+    new THREE.CircleGeometry(z.r, k.segments),
+    new THREE.MeshBasicMaterial({ color: k.color, transparent: true, opacity: k.opacity, depthWrite: false }),
   );
-  z.glow.position.set(x, y, 0.3);
-  z.mesh.position.set(x, y, 0.5);
-  scene.add(z.glow);
+  z.mesh.position.set(x, y, kind === 'sugar' ? 0.4 : kind === 'mate' ? 0.5 : 0.45);
+  if (z.glow) z.glow.position.set(x, y, 0.3);
   scene.add(z.mesh);
+  if (z.glow) scene.add(z.glow);
   zones.push(z);
   return z.id;
 }
 
-// Predator: a red octagon. Unlike sugar/mate, predator zones do not
-// consume on contact; they bias the fly's heading away and boost its
-// speed while within PREDATOR_RANGE_PT. The fly.escapeTeach signal is
-// forwarded to the sim so plasticity can apply sens->gf LTD.
-// Spec: fly-predator-zones.
-function spawnPredator(x, y) {
-  const z = { id: zoneIdSeq++, kind: 'predator', x, y, r: 50, mesh: null, born: performance.now() };
-  // Octagon shape via CircleGeometry with 8 segments; the radial fan
-  // approximates an octagon well at 50 pt radius.
-  z.mesh = new THREE.Mesh(
-    new THREE.CircleGeometry(z.r, 8),
-    new THREE.MeshBasicMaterial({ color: 0xb8232c, transparent: true, opacity: 0.75, depthWrite: false }),
-  );
-  z.mesh.position.set(x, y, 0.45);
-  scene.add(z.mesh);
-  zones.push(z);
-  return z.id;
-}
+function spawnSugar(x, y)    { return spawnZone('sugar',    x, y); }
+function spawnMate(x, y)     { return spawnZone('mate',     x, y); }
+function spawnPredator(x, y) { return spawnZone('predator', x, y); }
 
 function clearZones() {
   for (const z of zones) {
@@ -320,24 +314,42 @@ function clearZones() {
     if (z.glow) scene.remove(z.glow);
   }
   zones.length = 0;
+  zoneContactLogged.clear();
 }
 
-function drawZones(t) {
+// stepZoneMotion: per-frame motion primitive. Lerps the zone's
+// position toward its `target` at `speed` pt/s, repicks the target
+// every 4-10 s. The repick distribution includes a `chaseProb` branch
+// that picks a point within 200 pt of the fly (so the zone can
+// provoke a behavioural reaction within a normal session). Spec:
+// fly-zone-wander.
+//
+// The pure-function math (target pick, motion step) lives in
+// `../src/zone-motion.js` so the tests can drive a deterministic
+// random sequence. This wrapper handles the wall-clock repick loop
+// and applies the result to the zone's mesh state.
+function stepZoneMotion(z, dt, fly) {
+  const now = performance.now();
+  if (now >= z.nextHopMs) {
+    const r = Math.random();
+    const next = pickZoneTarget(z, fly, bounds, r);
+    z.target.x = next.x;
+    z.target.y = next.y;
+    z.nextHopMs = now + 4000 + Math.random() * 6000;
+  }
+  const next = stepZone(z, dt, bounds);
+  z.x = next.x;
+  z.y = next.y;
+}
+
+function drawZones(t, dt, fly) {
   for (const z of zones) {
+    stepZoneMotion(z, dt, fly);
     if (z.kind === 'sugar') {
       // gentle pulse to draw the eye
       const s = 1 + 0.08 * Math.sin(t * 2.5 + z.id);
       z.mesh.scale.set(s, s, 1);
     } else if (z.kind === 'mate') {
-      // lerp to next hop target; pick a new one every 6-12 s of sim time
-      if (t * 1000 > z.nextHop) {
-        const hw = bounds.width / 2 - 60, hh = bounds.height / 2 - 60;
-        z.target = { x: rnd(-hw, hw), y: rnd(-hh, hh) };
-        z.nextHop = t * 1000 + 6000 + Math.random() * 6000;
-      }
-      const k = 0.02;
-      z.x += (z.target.x - z.x) * k;
-      z.y += (z.target.y - z.y) * k;
       z.glow.position.set(z.x, z.y, 0.3);
       z.mesh.position.set(z.x, z.y, 0.5);
       const s = 1 + 0.15 * Math.sin(t * 4 + z.id);
@@ -368,6 +380,13 @@ function checkReaches(fly) {
     const i = zones.findIndex((z) => z.id === out.foodReached);
     if (i >= 0) {
       const z = zones[i];
+      const flyIdx = flies.indexOf(fly);
+      const key = `${z.id}:${flyIdx}`;
+      if (!zoneContactLogged.has(key)) {
+        zoneContactLogged.add(key);
+        const d = Math.hypot(z.x - fly.pos.x, z.y - fly.pos.y);
+        console.info(`[zone] sugar reach id=${z.id} fly=#${flyIdx} d=${d.toFixed(0)} bias=${out.foodAttract.toFixed(3)}`);
+      }
       if (z.mesh) scene.remove(z.mesh);
       if (z.glow) scene.remove(z.glow);
       zones.splice(i, 1);
@@ -384,6 +403,17 @@ function checkReaches(fly) {
   // Mate close approach: fire wing extension (DNp02/04/11) + courting
   // transient for the brain state line.
   if (out.mateClose) {
+    const flyIdx = flies.indexOf(fly);
+    for (const z of zones) {
+      if (z.kind !== 'mate') continue;
+      const d = Math.hypot(z.x - fly.pos.x, z.y - fly.pos.y);
+      if (d >= 60) continue;          // out of close-approach range
+      const key = `${z.id}:${flyIdx}`;
+      if (!zoneContactLogged.has(key)) {
+        zoneContactLogged.add(key);
+        console.info(`[zone] mate close id=${z.id} fly=#${flyIdx} d=${d.toFixed(0)} bias=${out.mateAttract.toFixed(3)}`);
+      }
+    }
     sim.stimulate(sim.escw, 0.35, 600);
     fly.wingRaise = Math.min(1, fly.wingRaise + 0.4);
     fly.onMateClose();
@@ -396,10 +426,19 @@ function checkReaches(fly) {
   // Spec: fly-predator-zones "Predator proximity boosts flight speed" +
   // "Predator exposure teaches escape".
   let nearestD = Infinity;
+  let nearestPredator = null;
   for (const z of zones) {
     if (z.kind !== 'predator') continue;
     const d = Math.hypot(z.x - fly.pos.x, z.y - fly.pos.y);
-    if (d < nearestD) nearestD = d;
+    if (d < nearestD) { nearestD = d; nearestPredator = z; }
+  }
+  if (nearestPredator && nearestD < PREDATOR_RANGE_PT) {
+    const flyIdx = flies.indexOf(fly);
+    const key = `${nearestPredator.id}:${flyIdx}`;
+    if (!zoneContactLogged.has(key)) {
+      zoneContactLogged.add(key);
+      console.info(`[zone] predator loom id=${nearestPredator.id} fly=#${flyIdx} d=${nearestD.toFixed(0)} bias=${out.predatorAttract.toFixed(3)}`);
+    }
   }
   if (Number.isFinite(nearestD)) {
     fly.onPredatorProximity(nearestD, PREDATOR_RANGE_PT);
@@ -579,7 +618,7 @@ function frame(tMs) {
   // update() consumes it. The order matters: checkReaches sets
   // fly._predatorSpeedMul; update() multiplies this frame's speed by it.
   if (first) {
-    drawZones(t);
+    drawZones(t, dt, first);
     checkReaches(first);
   }
   for (let i = 0; i < flies.length; i++) {
@@ -646,6 +685,25 @@ api.onCommand((c) => {
       // pick a random point within active-display bounds, well clear of the fly
       const hw = bounds.width / 2 - 80, hh = bounds.height / 2 - 80;
       spawnSugar(rnd(-hw, hw), rnd(-hh, hh));
+      break;
+    }
+    case 'spawnNear': {
+      // Spawn a sugar zone within 200 pt of the fly at a random angle.
+      // This is the deterministic demo entry so the user can verify
+      // sugar-reach behaviour without waiting for the chase-bias
+      // branch to fire. Spec: fly-zone-wander "Spawn Near Fly".
+      const fly0 = flies[0];
+      const hwN = bounds.width / 2 - 80, hhN = bounds.height / 2 - 80;
+      if (fly0) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = 50 + Math.random() * 150;     // 50..200 pt
+        spawnSugar(
+          Math.max(-hwN, Math.min(hwN, fly0.pos.x + dist * Math.cos(ang))),
+          Math.max(-hhN, Math.min(hhN, fly0.pos.y + dist * Math.sin(ang))),
+        );
+      } else {
+        spawnSugar(rnd(-hwN, hwN), rnd(-hhN, hhN));
+      }
       break;
     }
     case 'spawnPredator': {

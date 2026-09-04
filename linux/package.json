@@ -10,7 +10,8 @@
     "simtest": "node test/simtest.js",
     "behaviortest": "node test/behaviortest.js",
     "attracttest": "node test/attracttest.js",
-    "test": "node test/simtest.js && node test/behaviortest.js && node test/attracttest.js && node test/scaffold.test.js"
+    "zonemotion": "node test/zone-motion.test.js",
+    "test": "node test/simtest.js && node test/behaviortest.js && node test/attracttest.js && node test/zone-motion.test.js && node test/scaffold.test.js"
   },
   "license": "MIT",
   "dependencies": {

@@ -216,6 +216,7 @@ function buildTrayMenu() {
       label: 'Game',
       submenu: [
         { label: 'Spawn Sugar Zone', click: () => send(overlay, 'cmd', { name: 'spawnSugar' }) },
+        { label: 'Spawn Near Fly',    click: () => send(overlay, 'cmd', { name: 'spawnNear' }) },
         { label: 'Spawn Predator',   click: () => send(overlay, 'cmd', { name: 'spawnPredator' }) },
         { label: 'Spawn Mate',       click: () => send(overlay, 'cmd', { name: 'spawnMate' }) },
         { label: 'Clear Zones',      click: () => send(overlay, 'cmd', { name: 'clearZones' }) },

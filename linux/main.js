@@ -110,6 +110,7 @@ export function planOverlays(allDisplays, activeDisplayId) {
  *   onTrainer: (target: string, dir: 1 | -1) => void,
  *   onPlasticity: (action: 'enable' | 'disable' | 'reset') => void,
  *   onSpawnSugar: () => void,
+ *   onSpawnNear: () => void,
  *   onSpawnPredator: () => void,
  *   onSpawnMate: () => void,
  *   onClearZones: () => void,
@@ -166,6 +167,7 @@ export function buildTrayMenu(ctx) {
       label: 'Game',
       submenu: [
         { label: 'Spawn Sugar Zone', click: ctx.onSpawnSugar },
+        { label: 'Spawn Near Fly',    click: ctx.onSpawnNear },
         { label: 'Spawn Predator',   click: ctx.onSpawnPredator },
         { label: 'Spawn Mate',       click: ctx.onSpawnMate },
         { label: 'Clear Zones',      click: ctx.onClearZones },
@@ -611,6 +613,7 @@ function refreshTray() {
       }
     },
     onSpawnSugar: () => broadcastCmd({ name: 'spawnSugar' }),
+    onSpawnNear: () => broadcastCmd({ name: 'spawnNear' }),
     onSpawnPredator: () => broadcastCmd({ name: 'spawnPredator' }),
     onSpawnMate: () => broadcastCmd({ name: 'spawnMate' }),
     onClearZones: () => broadcastCmd({ name: 'clearZones' }),
