@@ -121,3 +121,27 @@ Plasma 6), and wlroots compositors report logical outputs through the
 | `xprop` not found | `apt install x11-utils`; the app still runs, just without window ledges |
 | Fly flickers / GPU error | `nvidia-smi` to check the driver; on Optimus laptops, force NVIDIA via `prime-run npm start` |
 | Tests fail with `EACCES: /dev/dri` | run under `xvfb-run -a npm test` (no real GPU needed) |
+
+## Game mode (food & mate)
+
+The tray has a **Game** submenu with three entries:
+
+- **Spawn Sugar Zone** — drops a yellow circle on the active display.
+  The fly orients toward it via a tarsal-contact gradient; on contact the
+  sugar disappears, the brain receives a `fwd + groom` reward pulse
+  (proboscis-extension surrogate), and Hebbian LTP grows the edges that
+  delivered the success.
+- **Spawn Mate** — drops a slowly-moving pink glow. The fly steers
+  toward it; close approach fires wing-extension (courtship surrogate).
+  The mate never disappears; **Clear Zones** wipes everything.
+- **Clear Zones** — removes all food and mate zones.
+
+The trainer submenu still has **Enable Hebbian plasticity** — leave it
+on while you hunt sugar, and the brain snapshots its weight matrix to
+`~/.config/desktop-fly/food-memories.json` every 30 s. Quit and relaunch
+and the brain picks up where it left off. **Reset weights** wipes the
+file.
+
+Headless smoke check: `node windows/test/attracttest.js` (14 cases) and
+`node windows/test/simtest.js` (10 phases) — both should pass before any
+change ships.

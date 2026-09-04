@@ -24,6 +24,14 @@ to stimulate it.
 
 ## What's real
 
+- **Goal-driven behavior**: the tray **Game** submenu spawns **sugar zones**
+  and a **mate** sprite. The fly orients toward sugar via tarsal-contact
+  gradient and reaches it within seconds; on contact a `fwd + groom`
+  reward pulse fires (proboscis-extension surrogate) and Hebbian LTP grows
+  the edges that delivered the success. The mate is a soft pheromone
+  glow — close approach fires wing-extension (courtship surrogate).
+  Weight matrix snapshots persist to `app.getPath('userData')/food-memories.json`
+  every 30 s while plasticity is on, and reload on next launch.
 - **23,210 neuron soma positions** (of 139,255 in FlyWire v783) render the
   rotating brain window, colored by super-class (FlyWire's coarse cell-type
   grouping).

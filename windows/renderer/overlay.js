@@ -8,6 +8,7 @@ import * as THREE from '../node_modules/three/build/three.module.js';
 import { LIFSim, SpikeBus } from '../src/sim.js';
 import { SignalBuilder } from '../src/signals.js';
 import { Fly, SHADOWS_ENABLED, setEscapeRateMul } from '../src/flymodel.js';
+import { foodAndMateAttract } from '../src/attract.js';
 import { clampf, rnd, lag } from '../src/util.js';
 
 const api = window.flyAPI;
@@ -82,6 +83,14 @@ let sim = null;
 let spikeBus = null;
 const signalBuilder = new SignalBuilder();
 
+// Sugar zones and pheromone-bearing mate sprites. The renderer owns the
+// state; the sim is unaware of them — it just receives scaled-up sensory
+// drive via sim.airPuff and reward stimulations on reach. Each zone also
+// has a three.js Mesh in `mesh` so we don't look it up by id per frame.
+const zones = [];
+let zoneIdSeq = 1;
+const THREE_ns = THREE;   // alias for the closure below
+
 let lastTime = null;
 let paused = false;
 let mouseScene = null;
@@ -98,6 +107,9 @@ let knownWindowIds = null;      // null until the first poll, like WindowSense.f
 let typingLevel = 0;
 let sleepy = false;
 let tempo = 1;
+let plasticEnabled = false;    // mirrors sim state for the save timer
+let lastSaveMs = 0;            // performance.now() of last Hebbian snapshot
+const SAVE_INTERVAL_MS = 30000;
 let activity = 1;
 let windowLoomL = 0;
 let windowLoomR = 0;
@@ -211,6 +223,110 @@ function injectTap(p) {
   if (strength > 0.05) sim.stimulate(sim.sens, 0.15 + strength * 0.35, 130);
 }
 
+// ---- food / mate (game) zones ----
+// Sugar: a yellow circle on the desktop; reach = eat. Reward stimulates
+// forward-walk + groom (proboscis-extension surrogate), the zone
+// disappears, and Hebbian LTP grows the sens -> fwd / sens -> groom edges
+// that delivered the success.
+//
+// Mate: a slowly-moving soft glow; never consumed, just a pheromone
+// gradient. Close approach (60 pt) fires wing-extension stimulation as a
+// courtship surrogate.
+function spawnSugar(x, y) {
+  const z = { id: zoneIdSeq++, kind: 'sugar', x, y, r: 28, mesh: null, born: performance.now() };
+  z.mesh = new THREE.Mesh(
+    new THREE.CircleGeometry(z.r, 32),
+    new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.65, depthWrite: false }),
+  );
+  z.mesh.position.set(x, y, 0.4);
+  scene.add(z.mesh);
+  zones.push(z);
+  return z.id;
+}
+
+function spawnMate(x, y) {
+  const z = {
+    id: zoneIdSeq++, kind: 'mate', x, y, r: 90,
+    target: { x, y },          // next destination; mate lerps toward it
+    nextHop: 0,                  // simMs when to pick a new target
+    mesh: null, glow: null, born: performance.now(),
+  };
+  z.glow = new THREE.Mesh(
+    new THREE.CircleGeometry(z.r, 48),
+    new THREE.MeshBasicMaterial({ color: 0xff7ad9, transparent: true, opacity: 0.18, depthWrite: false, blending: THREE.AdditiveBlending }),
+  );
+  z.mesh = new THREE.Mesh(
+    new THREE.CircleGeometry(10, 24),
+    new THREE.MeshBasicMaterial({ color: 0xff7ad9, transparent: true, opacity: 0.95, depthWrite: false }),
+  );
+  z.glow.position.set(x, y, 0.3);
+  z.mesh.position.set(x, y, 0.5);
+  scene.add(z.glow);
+  scene.add(z.mesh);
+  zones.push(z);
+  return z.id;
+}
+
+function clearZones() {
+  for (const z of zones) {
+    if (z.mesh) scene.remove(z.mesh);
+    if (z.glow) scene.remove(z.glow);
+  }
+  zones.length = 0;
+}
+
+function drawZones(t) {
+  for (const z of zones) {
+    if (z.kind === 'sugar') {
+      // gentle pulse to draw the eye
+      const s = 1 + 0.08 * Math.sin(t * 2.5 + z.id);
+      z.mesh.scale.set(s, s, 1);
+    } else if (z.kind === 'mate') {
+      // lerp to next hop target; pick a new one every 6-12 s of sim time
+      if (t * 1000 > z.nextHop) {
+        const hw = bounds.width / 2 - 60, hh = bounds.height / 2 - 60;
+        z.target = { x: rnd(-hw, hw), y: rnd(-hh, hh) };
+        z.nextHop = t * 1000 + 6000 + Math.random() * 6000;
+      }
+      const k = 0.02;
+      z.x += (z.target.x - z.x) * k;
+      z.y += (z.target.y - z.y) * k;
+      z.glow.position.set(z.x, z.y, 0.3);
+      z.mesh.position.set(z.x, z.y, 0.5);
+      const s = 1 + 0.15 * Math.sin(t * 4 + z.id);
+      z.glow.scale.set(s, s, 1);
+    }
+  }
+}
+
+function checkReaches(fly) {
+  if (!sim) return;
+  if (!zones.length) return;
+  const out = foodAndMateAttract(fly, zones);
+  // Sugar reach: pump fwd + groom, remove the zone.
+  if (out.foodReached !== null) {
+    const i = zones.findIndex((z) => z.id === out.foodReached);
+    if (i >= 0) {
+      const z = zones[i];
+      if (z.mesh) scene.remove(z.mesh);
+      if (z.glow) scene.remove(z.glow);
+      zones.splice(i, 1);
+      // Reward: forward-walk command (DNp09) + proboscis extension (DNg11).
+      // Single brief stimulation — operant-conditioning pulse, not a sustained drive.
+      sim.stimulate(sim.fwd, 0.5, 300);
+      sim.stimulate(sim.groom, 0.3, 200);
+      // Animate: brief wing raise (proboscis extension surrogate via groom).
+      fly.wingRaise = Math.min(1, fly.wingRaise + 0.7);
+    }
+  }
+  // Mate close approach: fire wing extension (DNp02/04/11).
+  if (out.mateClose) {
+    sim.stimulate(sim.escw, 0.35, 600);
+    fly.wingRaise = Math.min(1, fly.wingRaise + 0.4);
+  }
+  return out;
+}
+
 // Cursor kinematics -> looming drive for each eye of fly #1 + air puff.
 // This is the sensory transduction step; everything downstream of the
 // LC4/LPLC2 population is the real connectome.
@@ -275,7 +391,21 @@ function frame(tMs) {
     windowLoomR *= decayF;
     sim.loomL = Math.max(sensory.l, windowLoomL);
     sim.loomR = Math.max(sensory.r, windowLoomR);
-    sim.airPuff = Math.max(sensory.puff, typingLevel * 0.30);
+    // sugar + pheromone add a tarsal-contact gradient on top of the cursor
+    // air-puff; cap at 0.3 so the cursor's fast whoosh still wins.
+    let foodPuff = 0;
+    for (const z of zones) {
+      if (z.kind === 'sugar') {
+        const d = Math.hypot(z.x - first.pos.x, z.y - first.pos.y);
+        const k = clampf(1 - d / 220, 0, 1);
+        foodPuff = Math.max(foodPuff, k * 0.10);
+      } else if (z.kind === 'mate') {
+        const d = Math.hypot(z.x - first.pos.x, z.y - first.pos.y);
+        const k = clampf(1 - d / 320, 0, 1);
+        foodPuff = Math.max(foodPuff, k * 0.04);
+      }
+    }
+    sim.airPuff = Math.max(sensory.puff, Math.max(typingLevel * 0.30, foodPuff));
     // body -> brain: leg proprioception from the current gait
     sim.gaitDrive = first.walkingIntensity;
     sim.gaitPhase = first.gaitPhasePublic;
@@ -300,9 +430,22 @@ function frame(tMs) {
     }
   }
 
+  // Hebbian snapshot — only while plasticity is on and at most every 30 s.
+  // The interval is in wall-clock so a paused tab doesn't burn through it.
+  if (plasticEnabled && sim && performance.now() - lastSaveMs >= SAVE_INTERVAL_MS) {
+    const w = sim.exportWeights();
+    api.saveMemories({ weights: Array.from(w), edgesTouched: sim.plasticEdgesTouched ?? 0 });
+    lastSaveMs = performance.now();
+  }
+
   for (let i = 0; i < flies.length; i++) {
     flies[i].terrain = terrain;
+    flies[i].zones = zones;     // game zones, for food/mate heading bias
     flies[i].update(dt, bounds, mouseScene, i === 0 ? signals : null);
+  }
+  if (first) {
+    drawZones(t);
+    checkReaches(first);
   }
 
   renderer.render(scene, camera);
@@ -350,12 +493,26 @@ api.onCommand((c) => {
     case 'flyToNextDisplay': flyToNextDisplay(); break;
     case 'stim': stimulateGroup(c.group); break;
     case 'reward': trainerAction(c.target, +1); break;
+    case 'spawnSugar': {
+      // pick a random point within active-display bounds, well clear of the fly
+      const hw = bounds.width / 2 - 80, hh = bounds.height / 2 - 80;
+      spawnSugar(rnd(-hw, hw), rnd(-hh, hh));
+      break;
+    }
+    case 'spawnMate': spawnMate(rnd(-bounds.width / 4, bounds.width / 4),
+                                 rnd(-bounds.height / 4, bounds.height / 4)); break;
+    case 'clearZones': clearZones(); break;
     case 'punish': trainerAction(c.target, -1); break;
-    case 'resetTraining': if (sim) sim.resetPlasticity(); break;
+    case 'resetTraining': if (sim) { sim.resetPlasticity(); api.clearMemories(); } break;
     case 'enablePlasticity': if (sim) {
       sim.enablePlasticity({ eta: c.eta, alpha: c.alpha, stepMs: c.stepMs });
+      plasticEnabled = true;
     } break;
-    case 'disablePlasticity': if (sim) sim.disablePlasticity(); break;
+    case 'disablePlasticity': if (sim) {
+      sim.disablePlasticity();
+      // one last snapshot then stop the timer; user can re-enable and pick up
+      plasticEnabled = false;
+    } break;
     default: break;
   }
 });
@@ -391,6 +548,15 @@ api.onStimulate((req) => {
   if (data) {
     spikeBus = new SpikeBus();
     sim = new LIFSim(data.circuit, spikeBus);
+    // Restore any previously-saved food memories. Skipped silently if the
+    // file is missing, corrupt, or the wrong size for the current circuit
+    // (e.g. data/ was regenerated since last save).
+    try {
+      const mem = await api.loadMemories();
+      if (mem && Array.isArray(mem.weights) && sim.importWeights(mem.weights)) {
+        console.info(`restored ${mem.weights.length} weights from ${mem.savedAt ?? '?'}`);
+      }
+    } catch (err) { console.warn('food-memories load failed:', err); }
   } else {
     console.warn('no data/ — the fly falls back to legacy distance-based behavior');
   }

@@ -22,4 +22,9 @@ contextBridge.exposeInMainWorld('flyAPI', {
   // brain renderer
   onSpikes: on('spikes'),
   stimulate: (req) => ipcRenderer.send('stimulate', req),
+
+  // Hebbian food-memories persistence
+  loadMemories: () => ipcRenderer.invoke('memories:load'),
+  saveMemories: (data) => ipcRenderer.send('memories:save', data),
+  clearMemories: () => ipcRenderer.send('memories:clear'),
 });

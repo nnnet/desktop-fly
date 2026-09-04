@@ -103,6 +103,9 @@ export function planOverlays(allDisplays, activeDisplayId) {
  *   onScare: () => void,
  *   onTrainer: (target: string, dir: 1 | -1) => void,
  *   onPlasticity: (action: 'enable' | 'disable' | 'reset') => void,
+ *   onSpawnSugar: () => void,
+ *   onSpawnMate: () => void,
+ *   onClearZones: () => void,
  *   onQuit: () => void,
  *   activeDisplayId: number,
  *   displayCount: number,
@@ -120,6 +123,15 @@ export function buildTrayMenu(ctx) {
       label: 'Send Fly to Next Display',
       visible: ctx.displayCount > 1,
       click: ctx.onMove,
+    },
+    { type: 'separator' },
+    {
+      label: 'Game',
+      submenu: [
+        { label: 'Spawn Sugar Zone', click: ctx.onSpawnSugar },
+        { label: 'Spawn Mate',       click: ctx.onSpawnMate },
+        { label: 'Clear Zones',      click: ctx.onClearZones },
+      ],
     },
     { type: 'separator' },
     { label: 'Add Fly', click: ctx.onAddFly },
@@ -298,6 +310,31 @@ ipcMain.on('stimulate', (_e, req) => {
   }
 });
 
+// Hebbian food-memories persistence. userData on Linux lives under
+// ~/.config/<appname>/ so a `rm -rf ~/.config/desktop-fly` is the
+// nuclear option.
+import { promises as fsp, existsSync, unlinkSync } from 'fs';
+import { join } from 'path';
+const memoriesFile = () => join(app.getPath('userData'), 'food-memories.json');
+
+ipcMain.handle('memories:load', async () => {
+  try { return JSON.parse(await fsp.readFile(memoriesFile(), 'utf8')); }
+  catch { return null; }
+});
+ipcMain.on('memories:save', async (_e, payload) => {
+  if (!payload || !Array.isArray(payload.weights)) return;
+  try {
+    await fsp.writeFile(memoriesFile(), JSON.stringify({
+      version: 1, savedAt: new Date().toISOString(),
+      weights: payload.weights, edgesTouched: payload.edgesTouched ?? 0,
+    }));
+  } catch (err) { console.warn('memories:save failed:', err); }
+});
+ipcMain.on('memories:clear', () => {
+  try { if (existsSync(memoriesFile())) unlinkSync(memoriesFile()); }
+  catch (err) { console.warn('memories:clear failed:', err); }
+});
+
 async function run() {
   // Snapshot / brainshot short-circuit before we touch Tray or BrowserWindow.
   if (snapshotPath) return runSnapshot(snapshotPath);
@@ -398,6 +435,9 @@ function refreshTray() {
         broadcastCmd({ name: 'resetTraining' });
       }
     },
+    onSpawnSugar: () => broadcastCmd({ name: 'spawnSugar' }),
+    onSpawnMate: () => broadcastCmd({ name: 'spawnMate' }),
+    onClearZones: () => broadcastCmd({ name: 'clearZones' }),
     onQuit: () => { app.isQuitting = true; app.quit(); },
     activeDisplayId,
     displayCount: allDisplays.length,

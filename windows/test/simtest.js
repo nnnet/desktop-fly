@@ -147,9 +147,55 @@ const plasticWorks = maxDelta > 0;
 console.log(`plasticity 30s (eta=1e-3): max dW ${maxDelta.toExponential(2)}`
   + (plasticWorks ? '' : ' (no edge grew — pair-based LTP did not fire)'));
 
-const pass = gfSpont === 0 && gfLoom > 0 && walkOn > 0 && gfStim && siestaPct > 3
+let pass = gfSpont === 0 && gfLoom > 0 && walkOn > 0 && gfStim && siestaPct > 3
   && silenceWorks && plasticWorks;
+
+// Phase 9: food reward pathway. The renderer delivers a sugar reach as
+// sim.stimulate(sim.fwd, 0.5, 300) + sim.stimulate(sim.groom, 0.3, 200).
+// Run that once, then 1 s of free sim, and assert both DNp09 (rateFwd)
+// and DNg11 (rateGroom) rate-spiked relative to baseline.
+{
+  const sim3 = new LIFSim(data.circuit, null);
+  // warm-up: 2 s of ambient so baseline rates settle.
+  for (let ms = 0; ms < 2000; ms++) sim3.step(1);
+  const baseFwd = sim3.rateFwd;
+  const baseGroom = sim3.rateGroom;
+  if (sim3.fwd.length)   sim3.stimulate(sim3.fwd, 0.5, 300);
+  if (sim3.groom.length) sim3.stimulate(sim3.groom, 0.3, 200);
+  let fwdPeak = sim3.rateFwd, groomPeak = sim3.rateGroom;
+  for (let ms = 0; ms < 1000; ms++) {
+    sim3.step(1);
+    if (sim3.rateFwd > fwdPeak)   fwdPeak = sim3.rateFwd;
+    if (sim3.rateGroom > groomPeak) groomPeak = sim3.rateGroom;
+  }
+  const fwdReached   = fwdPeak   > baseFwd   + 1.0;
+  const groomReached = groomPeak > baseGroom + 1.0;
+  console.log(`food reach: DNp09 ${baseFwd.toFixed(1)}->peak ${fwdPeak.toFixed(1)} Hz,`
+    + ` DNg11 ${baseGroom.toFixed(1)}->peak ${groomPeak.toFixed(1)} Hz`
+    + (fwdReached && groomReached ? '' : ' (reward pulse did not propagate)'));
+  if (!(fwdReached && groomReached)) pass = false;
+}
+
+// Phase 10: mate close approach. The renderer fires sim.stimulate(sim.escw,
+// 0.35, 600) on close approach — wing extension as courtship surrogate.
+// Assert escw rate climbs during the pulse.
+{
+  const sim4 = new LIFSim(data.circuit, null);
+  for (let ms = 0; ms < 2000; ms++) sim4.step(1);
+  const baseEscw = sim4.rateEscW;
+  if (sim4.escw.length) sim4.stimulate(sim4.escw, 0.35, 600);
+  let peak = baseEscw;
+  for (let ms = 0; ms < 1000; ms++) {
+    sim4.step(1);
+    if (sim4.rateEscW > peak) peak = sim4.rateEscW;
+  }
+  const escwReached = peak > baseEscw + 5.0;
+  console.log(`mate close: escW ${baseEscw.toFixed(1)}->peak ${peak.toFixed(1)} Hz`
+    + (escwReached ? '' : ' (wing pulse did not propagate)'));
+  if (!escwReached) pass = false;
+}
+
 console.log(pass
-  ? 'PASS: GF silent at rest, fires on loom; locomotor drive fluctuates; stim works; siesta alive'
+  ? 'PASS: GF silent at rest, fires on loom; locomotor drive fluctuates; stim works; siesta alive; food+mate reach stimulate'
   : 'FAIL: tune weights/noise');
 process.exit(pass ? 0 : 1);

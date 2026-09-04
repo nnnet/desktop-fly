@@ -211,6 +211,15 @@ function buildTrayMenu() {
       ],
     },
     ...(multi ? [{ label: 'Send Fly to Next Display', click: sendFlyToNextDisplay }] : []),
+    { type: 'separator' },
+    {
+      label: 'Game',
+      submenu: [
+        { label: 'Spawn Sugar Zone', click: () => send(overlay, 'cmd', { name: 'spawnSugar' }) },
+        { label: 'Spawn Mate',       click: () => send(overlay, 'cmd', { name: 'spawnMate' }) },
+        { label: 'Clear Zones',      click: () => send(overlay, 'cmd', { name: 'clearZones' }) },
+      ],
+    },
     { label: 'Add Fly', click: () => send(overlay, 'cmd', { name: 'addFly' }) },
     { label: 'Remove Fly', click: () => send(overlay, 'cmd', { name: 'removeFly' }) },
     { label: 'Scare Flies', click: () => send(overlay, 'cmd', { name: 'scareAll' }) },
@@ -373,6 +382,37 @@ app.whenReady().then(() => {
 ipcMain.handle('brain-data', () => brainData);
 ipcMain.on('spikes', (_e, list) => send(brain, 'spikes', list));
 ipcMain.on('stimulate', (_e, req) => send(overlay, 'stimulate', req));
+
+// Hebbian food-memories persistence. The file lives in userData so it
+// survives app restarts but is wiped on uninstall. Format: a single JSON
+// object with a version, the weight Float32Array serialised as a plain
+// number[] (JSON has no typed-array encoding), and metadata.
+import { promises as fsp, existsSync, unlinkSync } from 'fs';
+import { join } from 'path';
+const memoriesFile = () => join(app.getPath('userData'), 'food-memories.json');
+
+ipcMain.handle('memories:load', async () => {
+  try {
+    const txt = await fsp.readFile(memoriesFile(), 'utf8');
+    return JSON.parse(txt);
+  } catch { return null; }
+});
+ipcMain.on('memories:save', async (_e, payload) => {
+  if (!payload || !Array.isArray(payload.weights)) return;
+  try {
+    const out = {
+      version: 1,
+      savedAt: new Date().toISOString(),
+      weights: payload.weights,
+      edgesTouched: payload.edgesTouched ?? 0,
+    };
+    await fsp.writeFile(memoriesFile(), JSON.stringify(out));
+  } catch (err) { console.warn('memories:save failed:', err); }
+});
+ipcMain.on('memories:clear', () => {
+  try { if (existsSync(memoriesFile())) unlinkSync(memoriesFile()); }
+  catch (err) { console.warn('memories:clear failed:', err); }
+});
 
 app.on('window-all-closed', () => { /* tray-only app: stay alive */ });
 app.on('before-quit', () => {

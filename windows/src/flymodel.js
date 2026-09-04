@@ -17,6 +17,7 @@
 import * as THREE from '../node_modules/three/build/three.module.js';
 import { rnd, clampf, angleDiff, smoothstep, lag, TUNED_HZ } from './util.js';
 import { makeSignals } from './sim.js';
+import { foodAndMateAttract } from './attract.js';
 
 export const SHADOWS_ENABLED = true;
 export const FLY_SCALE = 5.0;    // large enough to see at 1920x1080
@@ -339,6 +340,7 @@ export class Fly {
     this.stateAge = 0;
     this.terrain = [];      // walkable window edges, set by the coordinator
     this.ledge = null;      // currently attached window edge
+    this.zones = [];        // food / mate zones, set by the coordinator
     // Scene-space rects of the real displays. The overlay spans the whole
     // virtual desktop, which on a multi-monitor layout is not a solid
     // rectangle — these keep the fly out of the dead corners between screens.
@@ -637,6 +639,14 @@ export class Fly {
   }
 
   updateWalk(dt, bounds) {
+    // Food / mate heading bias runs first so it can override the off-screen
+    // correction that would otherwise keep the fly stuck on the edge of
+    // the monitor while the sugar sits on the next one over. We read the
+    // zone list off `this.zones` (set by the coordinator each frame).
+    if (this.zones && this.zones.length) {
+      const a = foodAndMateAttract(this, this.zones);
+      this.heading += a.foodAttract * 3.0 * dt + a.mateAttract * 1.5 * dt;
+    }
     // refresh the attached ledge from current terrain (windows move/close)
     if (this.ledge) {
       const cur = this.terrain.find((L) => L.id === this.ledge.id);
