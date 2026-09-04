@@ -110,6 +110,7 @@ export function planOverlays(allDisplays, activeDisplayId) {
  *   onTrainer: (target: string, dir: 1 | -1) => void,
  *   onPlasticity: (action: 'enable' | 'disable' | 'reset') => void,
  *   onSpawnSugar: () => void,
+ *   onSpawnPredator: () => void,
  *   onSpawnMate: () => void,
  *   onClearZones: () => void,
  *   onSetTheme: (name: string) => void,
@@ -165,6 +166,7 @@ export function buildTrayMenu(ctx) {
       label: 'Game',
       submenu: [
         { label: 'Spawn Sugar Zone', click: ctx.onSpawnSugar },
+        { label: 'Spawn Predator',   click: ctx.onSpawnPredator },
         { label: 'Spawn Mate',       click: ctx.onSpawnMate },
         { label: 'Clear Zones',      click: ctx.onClearZones },
       ],
@@ -225,10 +227,15 @@ export function createOverlayWindow(display, linuxDir, hidden) {
   const rendererDir = resolve(linuxDir, '..', 'windows', 'renderer');
   win.loadFile(resolve(rendererDir, 'overlay.html'));
   // Phase A: apply the requested theme + size before the first frame paints
-  // so the user never sees the default orange/1.0 flash. retarget below
-  // triggers the renderer to size the camera, and these cmds set the look.
+  // so the user never sees the default orange/1.0 flash. We send a single
+  // `boot-config` payload FIRST; the renderer awaits it before addFly()
+  // so the very first Fly is created with the right scale + theme (no
+  // visible jump from the default FLY_SCALE to cfgFlySize on frame 1).
+  // The setTheme / setSize cmds below then re-apply (idempotently) to
+  // every live Fly — including any added later via the tray.
   win.webContents.once('did-finish-load', () => {
     if (win.isDestroyed()) return;
+    win.webContents.send('boot-config', { theme: cfgFlyTheme, size: cfgFlySize });
     win.webContents.send('cmd', { name: 'setTheme', theme: cfgFlyTheme });
     win.webContents.send('cmd', { name: 'setSize', size: cfgFlySize });
   });
@@ -417,6 +424,14 @@ ipcMain.on('spikes', (_e, list) => {
     brainWindow.webContents.send('spikes', list);
   }
 });
+// Brain state readout (throttled to 10 Hz by the renderer). The brain
+// window subscribes via preload.mjs#onState and renders the line.
+// Spec: brain-state-readout.
+ipcMain.on('state', (_e, payload) => {
+  if (brainWindow && !brainWindow.isDestroyed() && payload) {
+    brainWindow.webContents.send('state', payload);
+  }
+});
 // Brain window's click-to-stimulate -> forward to the overlay (the only one
 // with the sim) so the user gets the same effect as Windows.
 ipcMain.on('stimulate', (_e, req) => {
@@ -596,6 +611,7 @@ function refreshTray() {
       }
     },
     onSpawnSugar: () => broadcastCmd({ name: 'spawnSugar' }),
+    onSpawnPredator: () => broadcastCmd({ name: 'spawnPredator' }),
     onSpawnMate: () => broadcastCmd({ name: 'spawnMate' }),
     onClearZones: () => broadcastCmd({ name: 'clearZones' }),
     onSetTheme: (name) => {
@@ -679,9 +695,17 @@ async function runSnapshot(outPath) {
     width: 720, height: 720,
     screens: [{ id: 0, x0: 0, y0: 0, x1: 720, y1: 720 }],
   });
-  // Phase A: apply --fly-theme and --fly-size before first frame so the
-  // snapshot reflects the requested look. 800 ms sleep below gives the
-  // renderer time to consume these.
+  // boot-config unblocks the overlay's addFly() gate (see
+  // overlay.js — addFly is deferred until this event arrives, so the
+  // first Fly is built with the right scale + theme, no jump on
+  // frame 1). Snapshot path must send it too — otherwise the renderer
+  // waits forever and the snapshot is a blank canvas.
+  win.webContents.send('boot-config', { theme: cfgFlyTheme, size: cfgFlySize });
+  // Phase A: re-apply (idempotently) via the same cmd channel the
+  // interactive path uses, so any future flies added by `addFly` tray
+  // calls during a long-running session pick up the same look. 800 ms
+  // sleep below gives the renderer time to consume these and to run
+  // a few sim steps before we capture.
   win.webContents.send('cmd', { name: 'setTheme', theme: cfgFlyTheme });
   win.webContents.send('cmd', { name: 'setSize', size: cfgFlySize });
   // Wait for the renderer's first paint AND give addFly() a few frames to land.

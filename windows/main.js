@@ -216,6 +216,7 @@ function buildTrayMenu() {
       label: 'Game',
       submenu: [
         { label: 'Spawn Sugar Zone', click: () => send(overlay, 'cmd', { name: 'spawnSugar' }) },
+        { label: 'Spawn Predator',   click: () => send(overlay, 'cmd', { name: 'spawnPredator' }) },
         { label: 'Spawn Mate',       click: () => send(overlay, 'cmd', { name: 'spawnMate' }) },
         { label: 'Clear Zones',      click: () => send(overlay, 'cmd', { name: 'clearZones' }) },
       ],
@@ -361,7 +362,21 @@ app.whenReady().then(() => {
 
   desktop = virtualBounds();
   overlay = createOverlay(desktop);
-  overlay.webContents.once('did-finish-load', publishGeometry);
+  // boot-config: send the default theme/size before any Fly is created.
+  // Linux CLI flags will be added in a follow-up; for now Windows uses
+  // the FLY_THEME/FLY_SIZE env vars via process.env (mirrors what
+  // linux/main.js does) or falls back to the FLY_THEMES / FLY_SCALE
+  // defaults baked into flymodel.js.
+  const bootCfg = {
+    theme: (process.env.FLY_THEME || 'orange').toLowerCase(),
+    size:  Number.isFinite(Number(process.env.FLY_SIZE))
+      ? Math.max(0.3, Math.min(5.0, Number(process.env.FLY_SIZE)))
+      : 1.0,
+  };
+  overlay.webContents.once('did-finish-load', () => {
+    publishGeometry();
+    overlay.webContents.send('boot-config', bootCfg);
+  });
   overlay.on('resize', publishGeometry);
   overlay.on('move', publishGeometry);
   if (brainData) brain = createBrain(screen.getPrimaryDisplay());
@@ -381,6 +396,7 @@ app.whenReady().then(() => {
 
 ipcMain.handle('brain-data', () => brainData);
 ipcMain.on('spikes', (_e, list) => send(brain, 'spikes', list));
+ipcMain.on('state', (_e, payload) => send(brain, 'state', payload));
 ipcMain.on('stimulate', (_e, req) => send(overlay, 'stimulate', req));
 
 // Hebbian food-memories persistence. The file lives in userData so it

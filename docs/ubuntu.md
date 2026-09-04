@@ -16,6 +16,10 @@ sudo apt-get install -y \
   nodejs npm \
   xvfb x11-utils xdotool wmctrl \
   nvidia-driver-580 libegl1 libgl1 libvulkan1
+
+# pnpm via corepack (ships with Node 16+).
+sudo corepack enable
+corepack prepare pnpm@11.22.0 --activate
 ```
 
 Versions: Node 22+ (Node 24 LTS tested), NVIDIA driver 580+ (anything that
@@ -39,7 +43,7 @@ If `nvidia_icd.json` is missing, install the matching driver and
 ```sh
 git clone https://github.com/DenisSergeevitch/desktop-fly.git
 cd desktop-fly/linux
-npm install
+pnpm install
 ```
 
 The shared sim and body code is symlinked from `../windows/src/...` — you
@@ -49,30 +53,41 @@ should see them as symlinks in `linux/src/`:
 ls -l src/    # sim.js -> ../../windows/src/sim.js, etc.
 ```
 
+`pnpm-workspace.yaml` is the source of truth for `allowBuilds` (electron
+needs postinstall scripts); pnpm 11 reads it from there, not from
+`package.json`.
+
 ## Run
 
 ```sh
-npm start
+pnpm start
 ```
 
 A 🪰 item appears in the system tray; the overlay opens on the primary
 display. Click **Send Fly to Next Display** to hop the fly across monitors.
 
+For the full port layout, tray items, and CLI flags see
+[`../linux/README.md`](../linux/README.md).
+
 ## Test
 
 ```sh
-npm test
+pnpm test
 ```
 
-Both suites (`simtest`, `behaviortest`) run on bare Node, with three.js
-operating headless. The `xvfb` wrapper is only needed if a host renderer
-init requires a window object — the suites are self-contained.
+Runs `simtest` (10 phases) + `behaviortest` (~23) + `attracttest` (14) +
+`scaffold` — all four suites are pure-Node, with three.js operating
+headless. The `xvfb` wrapper is only needed if a host renderer init
+requires a window object — the suites are self-contained.
 
 ## Snapshot (dGPU)
 
+There is no `pnpm run snapshot` script on this port. The two headless
+renderers are CLI flags on the main binary:
+
 ```sh
-npm run snapshot -- /tmp/fly.png         # 720x720 body render
-npm run brainshot -- /tmp/brain.png      # 720x560 brain render
+pnpm start -- --snapshot=/tmp/fly.png         # 720x720 body render
+pnpm start -- --brainshot=/tmp/brain.png      # 720x560 brain render
 ```
 
 Both paths use Electron's headless `BrowserWindow` with `offscreen: true` and
@@ -117,10 +132,10 @@ Plasma 6), and wlroots compositors report logical outputs through the
 | Tray icon 🪰 does not appear | `echo $XDG_CURRENT_DESKTOP`; on headless hosts the tray is hidden |
 | Black overlay on X11 | `export ELECTRON_OZONE_PLATFORM_HINT=x11`; the default on X11 is native X, not XWayland |
 | Black overlay on Wayland | `export ELECTRON_OZONE_PLATFORM_HINT=wayland`; ensure `nvidia_icd.json` is installed |
-| `Cannot find module 'koffi'` | koffi is Windows-only; linux/ does not depend on it. If you see this, an old `package.json` leaked. Re-run `npm install`. |
+| `Cannot find module 'koffi'` | koffi is Windows-only; linux/ does not depend on it. If you see this, an old `package.json` leaked. Re-run `pnpm install`. |
 | `xprop` not found | `apt install x11-utils`; the app still runs, just without window ledges |
-| Fly flickers / GPU error | `nvidia-smi` to check the driver; on Optimus laptops, force NVIDIA via `prime-run npm start` |
-| Tests fail with `EACCES: /dev/dri` | run under `xvfb-run -a npm test` (no real GPU needed) |
+| Fly flickers / GPU error | `nvidia-smi` to check the driver; on Optimus laptops, force NVIDIA via `prime-run pnpm start` |
+| Tests fail with `EACCES: /dev/dri` | run under `xvfb-run -a pnpm test` (no real GPU needed) |
 
 ## Customizing the fly
 
@@ -130,8 +145,8 @@ the CLI and from the tray.
 ### CLI
 
 ```sh
-npm start -- --fly-theme cyan --fly-size 1.5   # cyan fly at 1.5x scale
-FLY_THEME=magenta FLY_SIZE=2.0 npm start       # env vars work too
+pnpm start -- --fly-theme cyan --fly-size 1.5   # cyan fly at 1.5x scale
+FLY_THEME=magenta FLY_SIZE=2.0 pnpm start       # env vars work too
 ```
 
 `--fly-size` is clamped to `[0.3, 5.0]` — values outside the range are
@@ -171,25 +186,51 @@ hand) and are bundled as `windows/renderer/lessons.json` (the runtime
 sidecar). The `brain-trainer.test.js` suite validates every lesson:
 indices must be in-bounds, strength ∈ [0, 1], durationMs ∈ [50, 2000].
 
-## Game mode (food & mate)
+The trainer has a second tab, **Memory**, that reads
+`food-memories.json` on demand and on a 30 s poll and renders the
+top 20 edges by `|w|` as horizontal bars — green for LTP, red for LTD.
+The signed `dW` is shown to 4-decimal precision. The tab falls back
+to a `No learning yet` placeholder when the snapshot is missing or
+empty.
 
-The tray has a **Game** submenu with three entries:
+## Game mode (food, mate, predator)
+
+The tray has a **Game** submenu with four entries:
 
 - **Spawn Sugar Zone** — drops a yellow circle on the active display.
-  The fly orients toward it via a tarsal-contact gradient; on contact the
-  sugar disappears, the brain receives a `fwd + groom` reward pulse
-  (proboscis-extension surrogate), and Hebbian LTP grows the edges that
-  delivered the success.
+  The fly orients toward it via a tarsal-contact gradient; on contact
+  the sugar disappears, the brain receives a `fwd + groom` reward
+  pulse (proboscis-extension surrogate), and Hebbian LTP grows the
+  edges that delivered the success. The fly's `sugarLevel` is
+  restored on every eat; above the 0.2 threshold the fly chases
+  sugar, below it the fly ignores sugar and goes hungry until you
+  spawn more. **Sugar never respawns on its own** — the user is the
+  only source of new zones.
+- **Spawn Predator** — drops a red octagon. The fly rotates away,
+  gets a temporary speed boost (up to 1.5× within 900 pt), and the
+  proximity feeds an `escapeTeach` signal to the sim. With plasticity
+  on this drives Hebbian LTD on the sensory→giant-fiber edges.
+  Predator zones do not consume on contact.
 - **Spawn Mate** — drops a slowly-moving pink glow. The fly steers
   toward it; close approach fires wing-extension (courtship surrogate).
   The mate never disappears; **Clear Zones** wipes everything.
-- **Clear Zones** — removes all food and mate zones.
+- **Clear Zones** — removes all food, mate, and predator zones.
 
 The trainer submenu still has **Enable Hebbian plasticity** — leave it
 on while you hunt sugar, and the brain snapshots its weight matrix to
 `~/.config/desktop-fly/food-memories.json` every 30 s. Quit and relaunch
 and the brain picks up where it left off. **Reset weights** wipes the
 file.
+
+## Reading the brain window
+
+The brain window has a thin status bar at the top. The left side is
+the current behavioural state in a single word: `walk`, `flight`,
+`groom`, `idle`, `sleep`, `eat`, `court`. The right side shows the
+nine population rates the connectome already exposes, normalised to
+`[0, 1]` with 3-decimal precision: `LC4`, `LPLC2`, `GF`, `DNa01`,
+`DNa02`, `DNp09`, `DNg11`, `MDN`, `escW`. The readout is throttled
+to 10 Hz so the DOM does not churn at 60 fps.
 
 Headless smoke check: `node windows/test/attracttest.js` (14 cases) and
 `node windows/test/simtest.js` (10 phases) — both should pass before any
