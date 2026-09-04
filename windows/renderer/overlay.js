@@ -444,6 +444,20 @@ function checkReaches(fly) {
       zoneContactLogged.add(key);
       console.info(`[zone] predator loom id=${nearestPredator.id} fly=#${flyIdx} d=${nearestD.toFixed(0)} bias=${out.predatorAttract.toFixed(3)}`);
     }
+    // Escape reflex: a nearby predator drives the giant fiber (DNp01)
+    // directly. Without this sim input the fly stays in idle even
+    // though the heading-bias is firing. The threshold (300 pt) is
+    // inside PREDATOR_RANGE (900) and matches the loom-detector
+    // sensitivity used by the connectome's loom pathway. We only
+    // fire on loom (i.e. each zone, only once); the per-frame
+    // check is gated by the contact log so a long stay in range
+    // does not over-stimulate.
+    if (sim && sim.gf && nearestD < 300 && !zoneContactLogged.has(key + ':escape')) {
+      // mark a separate key so the loom log and the escape log
+      // are independent (re-entering range can re-fire both).
+      zoneContactLogged.add(key + ':escape');
+      sim.stimulate(sim.gf, 0.6, 80);
+    }
   }
   if (Number.isFinite(nearestD)) {
     fly.onPredatorProximity(nearestD, PREDATOR_RANGE_PT);
