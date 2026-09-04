@@ -112,10 +112,9 @@ function createOverlay(b) {
 }
 
 function createBrain(d) {
-  // Brain window grew vertically: 340x300 -> 340x540. The 3D point
-  // cloud keeps its original 300 px square; the lower 240 px
-  // holds the state line + memory panel.
-  const W = 340, H = 540;
+  // Original brain window size. The bar charts and the stats
+  // panel live in the trainer window.
+  const W = 340, H = 300;
   const win = new BrowserWindow({
     x: d.workArea.x + d.workArea.width - W - 18,
     y: d.workArea.y + d.workArea.height - H - 18,

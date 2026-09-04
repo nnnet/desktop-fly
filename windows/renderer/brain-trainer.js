@@ -230,12 +230,47 @@ async function refreshMemory() {
     root.innerHTML = '<div class="placeholder">No learning yet — fly has not eaten or fled.</div>';
     return;
   }
-  // Top 20 by |w|.
-  const idxs = payload.weights.map((w, i) => [Math.abs(w), w, i]);
+  // Top 20 by |w|, but only for edges between the 9 command
+  // populations (LC4, LPLC2, GF, DNa01/02, DNp09, DNg11, MDN,
+  // escW). Edges between "other" sensory / ascending / motor
+  // neurons are background activity — they are noise, not
+  // behaviour, and dominated the top-20 in the user's first
+  // review ("OTHER -> OTHER" everywhere).
+  const COMMAND_ROLES = new Set(['lc4', 'lplc2', 'gf', 'dna01', 'dna02',
+                                'dnp09', 'dng11', 'mdn', 'escw']);
+  function edgeIsCommand(i) {
+    if (!circuit || !circuit.edges || !circuit.edges[i]) return false;
+    const [pre, post] = circuit.edges[i];
+    const preR = circuit.neurons[pre] && circuit.neurons[pre].role;
+    const postR = circuit.neurons[post] && circuit.neurons[post].role;
+    return COMMAND_ROLES.has(preR) && COMMAND_ROLES.has(postR);
+  }
+  function shortRole(r) {
+    if (r === 'lc4') return 'LC4';
+    if (r === 'lplc2') return 'LPLC2';
+    if (r === 'dna01') return 'DNa01';
+    if (r === 'dna02') return 'DNa02';
+    if (r === 'dnp09') return 'DNp09';
+    if (r === 'dng11') return 'DNg11';
+    if (r === 'mdn')   return 'MDN';
+    if (r === 'escw')  return 'escW';
+    if (r === 'gf')    return 'GF';
+    return r ? r.toUpperCase() : '?';
+  }
+  function edgeLabelFor(i) {
+    if (!circuit || !circuit.edges || !circuit.edges[i]) return `edge #${i}`;
+    const [pre, post] = circuit.edges[i];
+    const preR = circuit.neurons[pre] && circuit.neurons[pre].role;
+    const postR = circuit.neurons[post] && circuit.neurons[post].role;
+    return `${shortRole(preR)}\u2192${shortRole(postR)}`;
+  }
+  const idxs = payload.weights
+    .map((w, i) => [Math.abs(w), w, i])
+    .filter(([, , i]) => edgeIsCommand(i));
   idxs.sort((a, b) => b[0] - a[0]);
   const top = idxs.slice(0, 20);
   if (!top.length || top[0][0] === 0) {
-    root.innerHTML = '<div class="placeholder">No learning yet — fly has not eaten or fled.</div>';
+    root.innerHTML = '<div class="placeholder">No learning yet between command populations.</div>';
     return;
   }
   const maxW = top[0][0];
@@ -245,9 +280,10 @@ async function refreshMemory() {
     row.className = 'bar';
     const lab = document.createElement('div');
     lab.className = 'label';
-    // The edge index is meaningless to a user; label it "edge #N". The
-    // signed dW is the actionable value.
-    lab.textContent = `edge #${i}`;
+    // Pre -> post population pair (e.g. 'LC4->DNp09'). The circuit
+    // edges line up with sim.w[i] / food-memories.json weights
+    // by index.
+    lab.textContent = edgeLabelFor(i);
     const tr = document.createElement('div');
     tr.className = 'track';
     const fill = document.createElement('div');

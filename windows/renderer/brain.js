@@ -58,72 +58,6 @@ function renderState(payload) {
 // involved. Spec: brain-state-readout.
 if (api.onState) api.onState((p) => renderState(p));
 
-// ---- Memory mini-panel ----
-// Reads the same food-memories.json snapshot the trainer's Memory
-// tab uses, but renders a compact 10-bar list under the state
-// line so the user can see Hebbian learning without opening
-// the trainer window. Polled at 5 s — slower than the
-// trainer's 30 s is wasteful, faster is noise.
-//
-// The renderer does not own the sim weights, so we are reading
-// the on-disk snapshot, not the live sim.w. The 30 s snapshot
-// cadence in linux/main.js#runSnapshot limits how fast the
-// file actually changes, so 5 s reads return the cached data
-// most of the time. The bar is "live" in the sense that as
-// soon as the snapshot updates, the panel reflects it.
-const memoryPanelEl = document.getElementById('memory-panel');
-async function refreshMemoryPanel() {
-  if (!api.loadMemories) return;
-  let payload = null;
-  try {
-    payload = await api.loadMemories();
-  } catch (_) { return; }
-  if (!payload || !Array.isArray(payload.weights) || payload.weights.length === 0) {
-    memoryPanelEl.classList.remove('on');
-    memoryPanelEl.innerHTML = '';
-    return;
-  }
-  // Top 10 by |w|. Drop zero entries.
-  const idxs = payload.weights
-    .map((w, i) => [Math.abs(w), w, i])
-    .filter(([a]) => a > 0)
-    .sort((a, b) => b[0] - a[0])
-    .slice(0, 10);
-  if (idxs.length === 0) {
-    memoryPanelEl.classList.remove('on');
-    memoryPanelEl.innerHTML =
-      '<div class="placeholder">No learning yet — fly has not eaten or fled.</div>';
-    return;
-  }
-  const maxW = idxs[0][0];
-  memoryPanelEl.innerHTML = '';
-  for (const [absW, w, i] of idxs) {
-    const row = document.createElement('div');
-    row.className = 'bar';
-    const lab = document.createElement('div');
-    lab.className = 'label';
-    lab.textContent = edgeLabel(i);
-    const tr = document.createElement('div');
-    tr.className = 'track';
-    const fill = document.createElement('div');
-    fill.className = 'fill ' + (w > 0 ? 'ltp' : 'ltd');
-    const pct = Math.max(2, Math.round((absW / maxW) * 100));
-    fill.style.width = pct + '%';
-    tr.appendChild(fill);
-    const dw = document.createElement('div');
-    dw.className = 'dW';
-    const sign = w >= 0 ? '+' : '−';
-    dw.textContent = `${sign}${Math.abs(w).toFixed(4)}`;
-    row.appendChild(lab); row.appendChild(tr); row.appendChild(dw);
-    memoryPanelEl.appendChild(row);
-  }
-  memoryPanelEl.classList.add('on');
-}
-if (api.loadMemories) {
-  refreshMemoryPanel();
-  setInterval(refreshMemoryPanel, 5000);
-}
-
 // super_class palette (index order from etl.py)
 const CLASS_COLORS = [
   [0.16, 0.22, 0.34],   // optic — dim blue (majority, keep subtle)
@@ -170,20 +104,12 @@ const group = new THREE.Group();
 group.rotation.x = -0.15;
 scene.add(group);
 
-// The 3D brain canvas is always 340x300 (the original brain
-// window size) regardless of the overall window height. The
-// state line + memory panel sit under the canvas at top: 300
-// (see brain.html). Using clientWidth/Height on the canvas
-// element keeps the renderer correctly sized even when the
-// window is resized.
-const BRAIN_W = 340, BRAIN_H = 300;
-
-const camera = new THREE.PerspectiveCamera(46, BRAIN_W / BRAIN_H, 1, 120);
+const camera = new THREE.PerspectiveCamera(46, window.innerWidth / window.innerHeight, 1, 120);
 camera.position.set(0, 0.6, 29);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
-renderer.setSize(BRAIN_W, BRAIN_H, false);
+renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
@@ -439,16 +365,9 @@ canvas.addEventListener('pointerover', () => { hovering = true; idleSince = 0; }
 canvas.addEventListener('pointerleave', () => { hovering = false; dragging = false; });
 
 window.addEventListener('resize', () => {
-  // The 3D brain canvas is fixed at 340x300; the lower 240 px
-  // holds the state line + memory panel and does not affect
-  // the renderer. We still update camera.aspect in case the
-  // window is resized to a different canvas size in the
-  // future, but the canonical case is no-op.
-  const w = canvas.clientWidth || BRAIN_W;
-  const h = canvas.clientHeight || BRAIN_H;
-  camera.aspect = w / h;
+  camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(w, h, false);
+  renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
 api.onSpikes((list) => {
