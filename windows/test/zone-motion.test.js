@@ -1,8 +1,10 @@
-// zone-motion.test.js — pure-function tests for zone wander.
+// zone-motion.test.js — pure-function tests for zone wander and
+// per-kind state machines (predator / mate / sugar).
 // Runs in bare Node, no Electron.
 //   node test/zone-motion.test.js
 
-import { pickZoneTarget, stepZoneMotion } from '../src/zone-motion.js';
+import { pickZoneTarget, stepZoneMotion,
+         predatorStep, mateStep, sugarStep } from '../src/zone-motion.js';
 
 let pass = 0, fail = 0;
 function check(name, cond) {
@@ -106,6 +108,86 @@ const fly = { pos: { x: 0, y: 0 } };
   }
   // we drove exactly 4 chase rolls; assert at least 3 are within 200
   check('30 sugar repicks: 4 chase rolls all within 200pt', chaseCount === 4 && within200 >= 3);
+}
+
+// -----------------------------------------------------------------------
+// Per-kind state machines
+// -----------------------------------------------------------------------
+
+// Fake a `performance.now()` for the helpers (they use the global if
+// present; we drive the wall clock from the test).
+function fakeNow(start) {
+  let now = start;
+  return { advance: (ms) => { now += ms; return now; }, get: () => now };
+}
+
+// Predator: stationary for 4-8 s, then sprints, then rests again.
+{
+  const clock = fakeNow(0);
+  // the helpers call performance.now() if defined; provide a stub.
+  globalThis.performance = { now: () => clock.get() };
+  const z = { kind: 'predator', x: 100, y: 100, target: { x: 0, y: 0 }, speed: 50 };
+  const fly = { pos: { x: 0, y: 0 } };
+  // Rest for 4 s
+  for (let i = 0; i < 4; i++) {
+    predatorStep(z, 1, fly, bounds);
+    clock.advance(1000);
+  }
+  check('predator: still at spawn after 4 s of rest', approx(z.x, 100) && approx(z.y, 100));
+  // After rest expires (5-8 s), a sprint target is picked and zone moves
+  for (let i = 0; i < 5; i++) {
+    predatorStep(z, 1, fly, bounds);
+    clock.advance(1000);
+  }
+  check('predator: moved from spawn after rest+sprint', Math.hypot(z.x - 100, z.y - 100) > 5);
+}
+
+// Mate: orbits the fly (within 200 pt) at least 60 % of a 30 s window.
+{
+  const clock = fakeNow(0);
+  globalThis.performance = { now: () => clock.get() };
+  const z = { kind: 'mate', x: 50, y: 0, target: { x: 50, y: 0 }, speed: 20 };
+  const fly = { pos: { x: 0, y: 0 } };
+  let within200 = 0;
+  const total = 30;     // 30 samples at 1 s intervals
+  for (let i = 0; i < total; i++) {
+    mateStep(z, 1, fly, bounds);
+    const d = Math.hypot(z.x - fly.pos.x, z.y - fly.pos.y);
+    if (d <= 200) within200++;
+    clock.advance(1000);
+  }
+  check(`mate: within 200 pt ${within200}/${total} >= 18 (60 %)`,
+    within200 >= 18);
+}
+
+// Sugar: stationary for 1-3 s, then flees, then sets removeRequested.
+{
+  const clock = fakeNow(0);
+  globalThis.performance = { now: () => clock.get() };
+  const z = { kind: 'sugar', x: 100, y: 0, speed: 30 };
+  const fly = { pos: { x: 0, y: 0 } };
+  // Tease: 0.5 s (1 sec of wall clock). Should still be stationary
+  // because the tease state lasts 1-3 s.
+  for (let i = 0; i < 2; i++) {
+    sugarStep(z, 0.5, fly, bounds);
+    clock.advance(500);
+  }
+  check('sugar: stationary in tease (within 1 s after spawn)',
+    approx(z.x, 100) && approx(z.y, 0));
+  // Skip past tease: 4 more seconds of wall clock forces the
+  // tease->flee transition (max tease = 3 s).
+  for (let i = 0; i < 8; i++) {
+    sugarStep(z, 0.5, fly, bounds);
+    clock.advance(500);
+  }
+  check('sugar: moved away from fly in flee',
+    z.x > 100 && Math.abs(z.y) < 1);
+  // Skip past flee: 4 more seconds (max flee = 3.5 s).
+  for (let i = 0; i < 8; i++) {
+    sugarStep(z, 0.5, fly, bounds);
+    clock.advance(500);
+  }
+  check('sugar: removeRequested after flee', z.removeRequested === true);
 }
 
 console.log(`\n${pass} pass, ${fail} fail`);

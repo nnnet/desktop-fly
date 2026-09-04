@@ -9,7 +9,7 @@ import { LIFSim, SpikeBus } from '../src/sim.js';
 import { SignalBuilder } from '../src/signals.js';
 import { Fly, SHADOWS_ENABLED, setEscapeRateMul, setTheme, setScale } from '../src/flymodel.js';
 import { zoneAttract, PREDATOR_RANGE_PT } from '../src/attract.js';
-import { pickZoneTarget, stepZoneMotion as stepZone } from '../src/zone-motion.js';
+import { pickZoneTarget, stepZoneMotion as stepZone, predatorStep, mateStep, sugarStep } from '../src/zone-motion.js';
 import { clampf, rnd, lag } from '../src/util.js';
 
 const api = window.flyAPI;
@@ -317,29 +317,14 @@ function clearZones() {
   zoneContactLogged.clear();
 }
 
-// stepZoneMotion: per-frame motion primitive. Lerps the zone's
-// position toward its `target` at `speed` pt/s, repicks the target
-// every 4-10 s. The repick distribution includes a `chaseProb` branch
-// that picks a point within 200 pt of the fly (so the zone can
-// provoke a behavioural reaction within a normal session). Spec:
-// fly-zone-wander.
-//
-// The pure-function math (target pick, motion step) lives in
-// `../src/zone-motion.js` so the tests can drive a deterministic
-// random sequence. This wrapper handles the wall-clock repick loop
-// and applies the result to the zone's mesh state.
+// stepZoneMotion: per-frame dispatch. Each zone kind has its own
+// state machine: predator ambush/sprint, mate orbit, sugar tease/flee.
+// Spec: fly-zone-per-kind-motion.
 function stepZoneMotion(z, dt, fly) {
-  const now = performance.now();
-  if (now >= z.nextHopMs) {
-    const r = Math.random();
-    const next = pickZoneTarget(z, fly, bounds, r);
-    z.target.x = next.x;
-    z.target.y = next.y;
-    z.nextHopMs = now + 4000 + Math.random() * 6000;
-  }
-  const next = stepZone(z, dt, bounds);
-  z.x = next.x;
-  z.y = next.y;
+  if (z.kind === 'predator')      predatorStep(z, dt, fly, bounds);
+  else if (z.kind === 'mate')      mateStep(z, dt, fly, bounds);
+  else if (z.kind === 'sugar')     sugarStep(z, dt, fly, bounds);
+  else                            stepZone(z, dt, bounds);
 }
 
 function drawZones(t, dt, fly) {
@@ -367,6 +352,18 @@ function drawZones(t, dt, fly) {
       const s = 1 + 0.18 * (0.5 + 0.5 * Math.sin(t * 6 + z.id));
       z.mesh.scale.set(s, s, 1);
       z.mesh.material.opacity = 0.55 + 0.20 * (0.5 + 0.5 * Math.sin(t * 8 + z.id));
+    }
+  }
+  // Self-despawning zones (sugar after its `flee` phase) request
+  // removal via `z.removeRequested = true`. Walk the array once at
+  // the end of the frame and dispose the matching meshes. The
+  // contact log already fired while the zone was in `tease`.
+  for (let i = zones.length - 1; i >= 0; i--) {
+    if (zones[i].removeRequested) {
+      const z = zones[i];
+      if (z.mesh) scene.remove(z.mesh);
+      if (z.glow) scene.remove(z.glow);
+      zones.splice(i, 1);
     }
   }
 }
@@ -564,6 +561,22 @@ function frame(tMs) {
     signals = signalBuilder.make(sim, dt);
     signals.tempo = tempo;
     signals.sleep = sleepy;
+
+    // Zone heading-bias (spec: fly-zone-heading-always-on).
+    // Computed ONCE per frame and applied to the primary fly's
+    // heading in front of fly.update() so the bias is honoured in
+    // every state (the previous code path only ran inside the
+    // fly model's updateWalk, which the 'idle' / 'flying' states
+    // never reach). The fly model no longer multiplies the bias
+    // a second time; this call is the single source of truth.
+    if (first && zones.length) {
+      const attract = zoneAttract(first, zones);
+      // Satiety gate: same as in checkReaches — a satiated fly
+      // does not chase sugar.
+      if (first.sugarLevel < 0.2) attract.foodAttract = 0;
+      const mult = (first.state === 'flying') ? 0.5 : 1.0;
+      first.heading += (attract.foodAttract + attract.mateAttract + attract.predatorAttract) * mult * dt;
+    }
 
     if (spikeBus) {
       const events = spikeBus.popAll();

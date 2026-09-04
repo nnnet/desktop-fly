@@ -17,7 +17,6 @@
 import * as THREE from '../node_modules/three/build/three.module.js';
 import { rnd, clampf, angleDiff, smoothstep, lag, TUNED_HZ } from './util.js';
 import { makeSignals } from './sim.js';
-import { zoneAttract } from './attract.js';
 
 export const SHADOWS_ENABLED = true;
 export const FLY_SCALE = 5.0;    // ROLLBACK: 14.0 made the fly invisible; restore 5.0 first.
@@ -799,26 +798,17 @@ export class Fly {
   }
 
   updateWalk(dt, bounds) {
-    // Food / mate / predator heading bias runs first so it can override
-    // the off-screen correction that would otherwise keep the fly stuck
-    // on the edge of the monitor while a sugar or predator sits on the
-    // next one over. We read the zone list off `this.zones` (set by the
-    // coordinator each frame) and use the full zoneAttract — not the
-    // legacy foodAndMateAttract alias — so predator bias and the
-    // speedMul boost are applied here too. The renderer's per-frame
-    // _predatorSpeedMul is also applied in update() before updateWalk;
-    // we re-apply it here for the case where a sub-class overrides
-    // speed mid-frame.
-    if (this.zones && this.zones.length) {
-      const a = zoneAttract(this, this.zones);
-      // Satiety gate: a satiated fly (sugarLevel >= SUGAR_THRESHOLD) has
-      // its foodAttract already zeroed by the renderer, but if any
-      // downstream caller bypasses the gate we still respect the field.
-      if (this.sugarLevel < SUGAR_THRESHOLD) a.foodAttract = 0;
-      this.heading += a.foodAttract * 3.0 * dt
-        + a.mateAttract * 1.5 * dt
-        + a.predatorAttract * 3.0 * dt;
-    }
+    // Zone heading-bias is applied by the renderer (in frame(),
+    // before fly.update) so the bias is honoured in every fly
+    // state, not only `walking`. We used to apply the same bias
+    // here a second time at 3x strength; that double-applied
+    // during the walking state and ran at 0 strength in idle /
+    // flying. The renderer is now the only place the bias is
+    // computed, and the per-frame multiplier there is 1.0x
+    // (0.5x in flying) so the net heading displacement matches
+    // the old 3x in the walking state. Spec:
+    // fly-zone-heading-always-on.
+    // refresh the attached ledge from current terrain (windows move/close)
     // refresh the attached ledge from current terrain (windows move/close)
     if (this.ledge) {
       const cur = this.terrain.find((L) => L.id === this.ledge.id);
