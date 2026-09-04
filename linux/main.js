@@ -182,7 +182,22 @@ export function createOverlayWindow(display, linuxDir, hidden) {
       sandbox: false,            // preload.mjs is ESM; sandbox:true strips it
     },
   });
-  win.loadFile(resolve(linuxDir, 'renderer/overlay.html'));
+  // The renderer assets live in windows/renderer/ — that directory is the
+  // single source of truth, the linux/ tree is a thin main-process wrapper
+  // around it.  linux/renderer/ is a per-machine scratchpad (overlay.html
+  // there is not git-tracked), so we must NOT use resolve(linuxDir, ...).
+  const rendererDir = resolve(linuxDir, '..', 'windows', 'renderer');
+  win.loadFile(resolve(rendererDir, 'overlay.html'));
+  // Pipe renderer console so we can debug the overlay from the terminal
+  // without opening DevTools. The renderer forwards all console.* through
+  // the flyAPI.sendLog IPC channel and the preload exposes it.
+  win.webContents.on('console-message', (_e, level, msg, line, src) => {
+    const tag = ['V', 'I', 'W', 'E'][level] || '?';
+    process.stderr.write(`[overlay ${tag}] ${msg}  (${src}:${line})\n`);
+  });
+  win.webContents.on('render-process-gone', (_e, d) => {
+    process.stderr.write(`[overlay GONE] reason=${d.reason} exitCode=${d.exitCode}\n`);
+  });
   win.once('ready-to-show', () => {
     win.setIgnoreMouseEvents(true, { forward: true });
     if (!hidden) win.show();
@@ -336,6 +351,27 @@ ipcMain.on('memories:save', async (_e, payload) => {
 ipcMain.on('memories:clear', () => {
   try { if (existsSync(memoriesFile())) unlinkSync(memoriesFile()); }
   catch (err) { console.warn('memories:clear failed:', err); }
+});
+
+// Forward every renderer console.{log,info,warn,error} to main stderr.
+// Used to debug the overlay without opening DevTools (X11+electron: DevTools
+// is a manual step we don't want to ask the user to repeat).
+ipcMain.on('renderer-log', (_e, { level, args }) => {
+  try {
+    const text = (args || []).map(a => {
+      if (typeof a === 'string') return a;
+      try { return JSON.stringify(a); } catch (_) { return String(a); }
+    }).join(' ');
+    process.stderr.write(`[renderer ${level}] ${text}\n`);
+  } catch (err) {
+    process.stderr.write(`[renderer log-forward fail] ${err.message}\n`);
+  }
+});
+
+// Boot probe: overlay.html/overlay.js ping this at every key checkpoint so
+// we get a breadcrumb trail even when console-message is silent.
+ipcMain.on('boot-probe', (_e, msg) => {
+  process.stderr.write(`[boot] ${msg}\n`);
 });
 
 async function run() {
@@ -502,7 +538,7 @@ async function runSnapshot(outPath) {
       console.warn('[desktop-fly] no data/ for snapshot:', e.message);
     }
   }
-  await win.loadFile(resolve(__dirname, 'renderer/overlay.html'));
+  await win.loadFile(resolve(__dirname, '..', 'windows', 'renderer', 'overlay.html'));
   // Send a retarget with the window size so the ortho camera fits.
   win.webContents.send('retarget', {
     width: 720, height: 720,

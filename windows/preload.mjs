@@ -7,6 +7,12 @@ const on = (channel) => (fn) => {
   ipcRenderer.on(channel, (_e, payload) => fn(payload));
 };
 
+// debug probe — overlay.html#window.__boot pings this so we get a breadcrumb
+// trail in main even if the module script never finishes importing.
+contextBridge.exposeInMainWorld('electronProbe', (msg) => {
+  try { ipcRenderer.send('boot-probe', String(msg).slice(0, 240)); } catch (_) {}
+});
+
 contextBridge.exposeInMainWorld('flyAPI', {
   getBrainData: () => ipcRenderer.invoke('brain-data'),
 
@@ -27,4 +33,7 @@ contextBridge.exposeInMainWorld('flyAPI', {
   loadMemories: () => ipcRenderer.invoke('memories:load'),
   saveMemories: (data) => ipcRenderer.send('memories:save', data),
   clearMemories: () => ipcRenderer.send('memories:clear'),
+
+  // debug: forward renderer console to main process log
+  sendLog: (level, args) => ipcRenderer.send('renderer-log', { level, args }),
 });

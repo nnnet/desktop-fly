@@ -13,6 +13,26 @@ import { clampf, rnd, lag } from '../src/util.js';
 
 const api = window.flyAPI;
 
+// Forward every console message to the main process so we can debug the
+// overlay from the terminal without opening DevTools. The preload exposes
+// `sendLog` over IPC; if it's missing (e.g. older binary) the calls no-op.
+if (api && api.sendLog) {
+  for (const level of ['log', 'info', 'warn', 'error']) {
+    const orig = console[level].bind(console);
+    console[level] = (...args) => {
+      try {
+        const safe = (args || []).map(a => {
+          if (a instanceof Error) return a.message + (a.stack ? '\n' + a.stack : '');
+          if (typeof a === 'object') { try { return JSON.stringify(a); } catch (_) { return String(a); } }
+          return a;
+        });
+        api.sendLog(level, safe);
+      } catch (_) { /* no-op */ }
+      orig(...args);
+    };
+  }
+}
+
 let bounds = { width: window.innerWidth, height: window.innerHeight };
 
 // ---- scene ----
