@@ -1,0 +1,84 @@
+windows/renderer/brain-trainer.html
+  s_c80a415793d991::t_1ceead236c3eb4 22-45
+  s_c80a415793d991::t_9eedd843ab3f3a 79-97
+windows/test/simtest.js
+  s_c80a415793d991::t_3137b37423d7e5 153-207
+windows/src/sim.js
+  s_c80a415793d991::t_935db20c2e1c17 360-362,364-384,390-395,479
+  s_c80a415793d991::t_1ee92fef1f961c 359
+  s_c80a415793d991::t_307a7b279fb57a 242-250
+  s_c80a415793d991::t_5248bc1026dcaa 455-456,463-464,470-475,477-478
+  s_c80a415793d991::t_8788d17cdac301 65-68
+  s_c80a415793d991::t_a058390ebdb60c 128-131
+  s_c80a415793d991::t_743c635eeabdfa 169-171
+  s_c80a415793d991::t_61f2c7268517d9 78-80
+  s_c80a415793d991::t_fea0725408a31f 465-469
+  s_c80a415793d991::t_c26c600a39c740 457-462,476
+  s_70d800af6afa3d::t_739696fb555c11 132,480
+windows/src/flymodel.js
+  s_c80a415793d991::t_527f1cf85cc23b 607-629
+  s_c80a415793d991::t_c029624168c017 20
+  s_c80a415793d991::t_3546b08123e84f 666-672
+  s_c80a415793d991::t_58b43e123b4434 872-875
+  s_c80a415793d991::t_0490419b74f7b2 135-146
+  s_c80a415793d991::t_62bcd871fb1fde 452-466
+  s_c80a415793d991::t_5ca61991f6a12b 113-120,124-126
+  s_c80a415793d991::t_ee002bb6063e91 556
+  s_c80a415793d991::t_8bd5152aebca16 796-805,807-814
+  s_c80a415793d991::t_2b1c72bac6f319 295-298
+  s_c80a415793d991::t_497075768e6374 467
+windows/test/attracttest.js
+  s_c80a415793d991::t_e9425d6833a854 113-118,122,124,127-129,135
+  s_c80a415793d991::t_da33234c4fb69e 1,5
+  s_c80a415793d991::t_5b3dea36a78bf7 18,22,30,34,42,51,57,59,67,76,87,97,106,119-121,123,125-126,130-134,136-179
+  s_70d800af6afa3d::t_efa72267e82b20 180
+windows/renderer/overlay.js
+  s_c80a415793d991::t_efe8d7682cfad6 577-580,585-592
+  s_c80a415793d991::t_7c877f8115b2c8 651-655
+  s_c80a415793d991::t_18461526cadc09 133-136
+  s_c80a415793d991::t_880e4994f2ec27 298-316
+  s_c80a415793d991::t_e553cadd6223e5 525-561
+  s_c80a415793d991::t_7fc915b3d93830 357-366,378-379,384-385,389,391-420,562,657
+  s_c80a415793d991::t_39aecf758c5421 593,721-753
+  s_c80a415793d991::t_84c5669ffc0547 771-774
+  s_c80a415793d991::t_990750d2dbe607 345-349
+  s_c80a415793d991::t_4a7c4fdff73102 11
+  s_c80a415793d991::t_f9daaad170a65e 656
+windows/renderer/brain.html
+  s_c80a415793d991::t_6cb3db7529fc1c 35
+  s_c80a415793d991::t_08cce213ef3f7a 19-31
+windows/renderer/brain-trainer.js
+  s_c80a415793d991::t_81b659b04392b2 185-272
+windows/preload.mjs
+  s_c80a415793d991::t_9a9fb7e62010f3 32-34
+  s_c80a415793d991::t_bd91c695fd6b37 26-30
+  s_c80a415793d991::t_47c890767f14d5 38
+windows/renderer/brain.js
+  s_c80a415793d991::t_d3105edca9b06e 15-59
+windows/src/attract.js
+  s_c80a415793d991::t_7d89091b04e97a 1-3,6-21,25-26,31-32,50-54,57,60,95-112,121-122,124,126-142
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "28fbbcc1e350b6f38876528a584ea2db08699f2f",
+  "prompts": {},
+  "sessions": {
+    "s_70d800af6afa3d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9fc896e8-acdd-46d4-bcec-85e106aaa7b6",
+        "model": "OpenRouter/minimax/minimax-m3:free"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    },
+    "s_c80a415793d991": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2d902537-236e-4079-aeca-c6e315116f31",
+        "model": "OpenRouter/minimax/minimax-m3:free"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    }
+  }
+}
