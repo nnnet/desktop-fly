@@ -1,0 +1,33 @@
+windows/src/flymodel.js
+  s_430e98b37be290::t_1d3ae8e4a4652b 532-550
+  s_430e98b37be290::t_0cb299e274c76b 24-27
+  s_430e98b37be290::t_8b33bb91096e9e 56-91,94-123
+linux/main.js
+  s_430e98b37be290::t_8f2f37a774d028 154,520-529,535-536
+  s_430e98b37be290::t_6031409eb58d3a 599-603
+  s_430e98b37be290::t_703fd4ad8fd525 115-116,122-123,127-129,141-153
+  s_430e98b37be290::t_10f2b037c41823 219-226
+  s_430e98b37be290::t_e134ba9b6b5f10 77-82
+  s_430e98b37be290::t_a9de97f1fbb1d2 251-254
+  s_430e98b37be290::t_a365e2d3a0b124 155
+linux/test/snapshot.test.js
+  s_430e98b37be290::t_2bbc5a285ce6a1 64-114
+windows/renderer/overlay.js
+  s_430e98b37be290::t_4d740fed4a5587 10,529-545
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "024ec640003b70846a57dc576420f4fbf8fccc2f",
+  "prompts": {},
+  "sessions": {
+    "s_430e98b37be290": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "18aa132c-62af-4457-9466-04d1348b6c17",
+        "model": "minimax/minimax-m3:free"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    }
+  }
+}
