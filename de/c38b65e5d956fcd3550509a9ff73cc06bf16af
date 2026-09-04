@@ -1,0 +1,21 @@
+windows/renderer/overlay.js
+  s_430e98b37be290::t_9af2d77d769800 127-130,534-535
+windows/src/flymodel.js
+  s_430e98b37be290::t_05f0647f013988 23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "dec38b65e5d956fcd3550509a9ff73cc06bf16af",
+  "prompts": {},
+  "sessions": {
+    "s_430e98b37be290": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "18aa132c-62af-4457-9466-04d1348b6c17",
+        "model": "minimax/minimax-m3:free"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    }
+  }
+}
