@@ -1,0 +1,45 @@
+docs/ubuntu.md
+  s_430e98b37be290::t_48fe886c3c3c56 125-173
+data/lessons/groom-trigger.json
+  s_430e98b37be290::t_0d050d74b41393 1-9
+data/lessons/sugar-forward-walk.json
+  s_430e98b37be290::t_d34e8cd2855535 1-9
+data/lessons/turn-left.json
+  s_430e98b37be290::t_c1da751cbcfd52 1-9
+windows/renderer/brain-trainer.js
+  s_430e98b37be290::t_f3cd90a68e67bc 1-189
+windows/renderer/lessons.json
+  s_430e98b37be290::t_485e805d856faf 1-38
+windows/preload.mjs
+  s_430e98b37be290::t_d75265dc756742 37-41
+data/lessons/loom-escape.json
+  s_430e98b37be290::t_4a1a0a47891ebc 1-9
+linux/main.js
+  s_430e98b37be290::t_d86dfbcfdcd130 138-142
+  s_430e98b37be290::t_10ff33c8e31b65 300-347
+  s_430e98b37be290::t_d2d88ef12c9ded 611,617
+  s_430e98b37be290::t_f533c85927321a 456-476
+  s_430e98b37be290::t_e738485af0f2d4 117,123
+  s_430e98b37be290::t_0f404804ff967d 433-436
+  s_430e98b37be290::t_49e9d565ea976e 137
+windows/renderer/brain-trainer.html
+  s_430e98b37be290::t_779524371bbc3d 1-75
+linux/test/brain-trainer.test.js
+  s_430e98b37be290::t_dc89ff6e0fee88 1-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "f72efaff555e8a02eed9c33f2dca6b2a85b359ef",
+  "prompts": {},
+  "sessions": {
+    "s_430e98b37be290": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "18aa132c-62af-4457-9466-04d1348b6c17",
+        "model": "minimax/minimax-m3:free"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    }
+  }
+}
