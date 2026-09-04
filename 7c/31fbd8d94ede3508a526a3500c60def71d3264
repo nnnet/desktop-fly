@@ -1,0 +1,29 @@
+windows/renderer/brain-trainer.js
+  s_c80a415793d991::t_e005cc0c9dbb9d 233-269,273,283-286
+windows/renderer/brain.js
+  s_c80a415793d991::t_ffb9f7b2333386 107,112
+  s_c80a415793d991::t_37f262aa1d7d17 368,370
+windows/main.js
+  s_c80a415793d991::t_04b1a5e275b0e2 115-117
+linux/main.js
+  s_c80a415793d991::t_04b1a5e275b0e2 282-285
+windows/renderer/brain.html
+  s_c80a415793d991::t_d2efceec1bac99 15,24-27,29-30,32,37-38
+  s_c80a415793d991::t_cddf7649e5e3d5 41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "7c31fbd8d94ede3508a526a3500c60def71d3264",
+  "prompts": {},
+  "sessions": {
+    "s_c80a415793d991": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2d902537-236e-4079-aeca-c6e315116f31",
+        "model": "OpenRouter/minimax/minimax-m3:free"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    }
+  }
+}
