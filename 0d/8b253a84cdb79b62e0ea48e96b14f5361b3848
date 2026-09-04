@@ -1,0 +1,19 @@
+plans/260904-1850-fly-size-color-brain-trainer/plan.md
+  s_430e98b37be290::t_ffb800505dc42c 1-286
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "0d8b253a84cdb79b62e0ea48e96b14f5361b3848",
+  "prompts": {},
+  "sessions": {
+    "s_430e98b37be290": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "18aa132c-62af-4457-9466-04d1348b6c17",
+        "model": "minimax/minimax-m3:free"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    }
+  }
+}
