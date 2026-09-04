@@ -32,6 +32,18 @@ to stimulate it.
   glow — close approach fires wing-extension (courtship surrogate).
   Weight matrix snapshots persist to `app.getPath('userData')/food-memories.json`
   every 30 s while plasticity is on, and reload on next launch.
+- **Optogenetic brain trainer**: tray **Brain ▸ Open Trainer** opens a
+  lessons panel with pre-built stimulation patterns derived from the real
+  FlyWire v783 connectome (loom-escape, sugar-forward-walk, turn-left,
+  groom-trigger). Click **Apply** to inject current into the listed
+  neurons; the brain window flashes the targeted cells. Patterns are
+  editable under `data/lessons/*.json` (source of truth) and
+  `~/.config/desktop-fly/lessons/<name>.json` (per-user saves).
+- **Customizable appearance**: the tray **Theme** submenu ships six
+  palettes (`orange`, `fruitfly`, `cyan`, `magenta`, `yellow`, `green`)
+  and the **Size** submenu scales the body from 0.5x to 3x at runtime.
+  CLI flags `--fly-theme` and `--fly-size` (clamped to `[0.3, 5.0]`) do
+  the same at startup.
 - **23,210 neuron soma positions** (of 139,255 in FlyWire v783) render the
   rotating brain window, colored by super-class (FlyWire's coarse cell-type
   grouping).
