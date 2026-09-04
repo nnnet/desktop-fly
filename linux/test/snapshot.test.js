@@ -112,3 +112,16 @@ test('overlay.js imports setTheme + setScale and handles cmd cases', () => {
   assert.match(overlay, /case\s*'setTheme'/);
   assert.match(overlay, /case\s*'setSize'/);
 });
+
+// --- Phase C fix: onTerrain handler must guard against snap.windows === undefined
+// (regression for the "Cannot read properties of undefined (reading 'map')"
+// crash that fired when the Windows terrain-shape arrived on Linux without
+// the `windows` field — the steck trace pointed to preload.mjs:7 because the
+// listener was defined there, but the .map() call lives in overlay.js).
+
+test('overlay.js onTerrain handler guards against undefined snap.windows', () => {
+  const overlay = readFileSync(resolve(linux, '..', 'windows', 'renderer', 'overlay.js'), 'utf8');
+  // The fix wraps the call in Array.isArray() ? ... : [] before .map().
+  assert.match(overlay, /Array\.isArray\(snap\.windows\)\s*\?\s*snap\.windows\s*:\s*\[\]/,
+    'onTerrain must guard snap.windows with Array.isArray() before .map()');
+});

@@ -491,10 +491,15 @@ api.onAmbient((a) => {
 
 api.onTerrain((snap) => {
   terrain = snap.ledges;
-  const ids = new Set(snap.windows.map((w) => w.id));
+  // Linux main sends `windows` (the live _NET_CLIENT_LIST); Windows main
+  // historically sent the ledges-only shape. Guard the map so a payload
+  // without `windows` doesn't crash the renderer with
+  // "Cannot read properties of undefined (reading 'map')".
+  const winList = Array.isArray(snap.windows) ? snap.windows : [];
+  const ids = new Set(winList.map((w) => w.id));
   if (knownWindowIds !== null) {
     const fly = flies[0];
-    for (const w of snap.windows) {
+    for (const w of winList) {
       if (knownWindowIds.has(w.id)) continue;
       if (!fly) continue;
       const d = Math.hypot(w.center.x - fly.pos.x, w.center.y - fly.pos.y);
