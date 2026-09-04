@@ -21,6 +21,10 @@ import { foodAndMateAttract } from './attract.js';
 
 export const SHADOWS_ENABLED = true;
 export const FLY_SCALE = 5.0;    // ROLLBACK: 14.0 made the fly invisible; restore 5.0 first.
+// Runtime-mutable scale (let) so the tray/CLI can change fly size without
+// restarting. Existing Fly nodes re-apply via the swapBody path on every
+// `setScale`; the const above is just the initial value.
+export let flyScaleCurrent = FLY_SCALE;
 export const EDGE_MARGIN = 50;
 
 // MARK: - Theme
@@ -49,8 +53,74 @@ export const FLY_THEMES = {
     wingFleck: 0xfff2a0,             // pale gold wingtip
     leg:    0x1a1a1a,
   },
+  cyan: {
+    body:    0x00b4d8,               // cyan thorax
+    head:    0x48cae4,
+    eye:     0x101820,
+    abdomen: 0x0096c7,
+    wingVein: 0x222222,
+    wingFleck: 0xe0fbff,
+    leg:     0x0a1a20,
+  },
+  magenta: {
+    body:    0xc71585,               // magenta thorax
+    head:    0xe040a0,
+    eye:     0x101010,
+    abdomen: 0xa0126a,
+    wingVein: 0x222222,
+    wingFleck: 0xffd6f5,
+    leg:     0x180a14,
+  },
+  yellow: {
+    body:    0xffd700,               // bright yellow
+    head:    0xfff080,
+    eye:     0x202020,
+    abdomen: 0xe6c200,
+    wingVein: 0x222222,
+    wingFleck: 0xfffce0,
+    leg:     0x1a1a1a,
+  },
+  green: {
+    body:    0x2cb42c,               // saturated green
+    head:    0x60d060,
+    eye:     0x101810,
+    abdomen: 0x229922,
+    wingVein: 0x222222,
+    wingFleck: 0xe0ffe0,
+    leg:     0x0a180a,
+  },
 };
 export let FLY_THEME = FLY_THEMES.orange;   // current theme (let — swappable)
+
+// MARK: - Runtime mutators (Phase A: configurability)
+//
+// These mutate the global theme/scale so the tray/CLI can change the fly at
+// runtime. The renderer is expected to re-apply them to any existing Fly
+// instances (e.g. via swapBody) after calling these; the renderer is also
+// responsible for reading the new values back when building a fresh body.
+
+// Available theme names — used by CLI parser and tray submenu.
+export const FLY_THEME_NAMES = Object.keys(FLY_THEMES);
+
+// setTheme(name): switch the active theme. Returns true on success, false if
+// name is unknown (CLI/tray should validate before calling).
+export function setTheme(name) {
+  if (!Object.prototype.hasOwnProperty.call(FLY_THEMES, name)) return false;
+  FLY_THEME = FLY_THEMES[name];
+  return true;
+}
+
+// setScale(v): change the body scale at runtime. Clamped to [0.3, 5.0] to
+// keep the fly on screen and to avoid the original FLY_SCALE=14.0 invisibility
+// bug. The renderer is expected to walk all Fly nodes and re-set
+// `node.scale.set(flyScaleCurrent, flyScaleCurrent, flyScaleCurrent)`.
+export function setScale(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return false;
+  const clamped = Math.max(0.3, Math.min(5.0, n));
+  flyScaleCurrent = clamped;
+  return clamped;
+}
 // How close the fly's centre may get to the edge of the desktop while walking.
 // The body is ~30 px tall at FLY_SCALE, so the macOS value of 20 let the head
 // slide under the screen edge; this keeps the whole body on screen.
@@ -457,6 +527,25 @@ export class Fly {
     });
     this.model.blurWingL.visible = false;
     this.model.blurWingR.visible = false;
+  }
+
+  // applyTheme(): swap to the currently-selected FLY_THEME on this fly.
+  // The body must be rebuilt because materials are baked into the meshes.
+  // Caller is expected to have set FLY_THEME (via setTheme()) first.
+  applyTheme() {
+    const parent = this.model.root.parent;
+    if (parent) parent.remove(this.model.root);
+    this.model = buildFlyModel();
+    this.model.root.scale.set(flyScaleCurrent, flyScaleCurrent, flyScaleCurrent);
+    if (parent) parent.add(this.model.root);
+  }
+
+  // applyScale(): re-apply the current flyScaleCurrent to this fly's root.
+  // land() and the initial build both read FLY_SCALE (the const initial
+  // value); this method is the runtime re-apply path.
+  applyScale() {
+    const s = flyScaleCurrent;
+    this.model.root.scale.set(s, s, s);
   }
 
   // Queue a body saccade instead of snapping the heading. Escape turns do NOT

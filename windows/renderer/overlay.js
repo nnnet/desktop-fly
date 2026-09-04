@@ -7,7 +7,7 @@
 import * as THREE from '../node_modules/three/build/three.module.js';
 import { LIFSim, SpikeBus } from '../src/sim.js';
 import { SignalBuilder } from '../src/signals.js';
-import { Fly, SHADOWS_ENABLED, setEscapeRateMul } from '../src/flymodel.js';
+import { Fly, SHADOWS_ENABLED, setEscapeRateMul, setTheme, setScale } from '../src/flymodel.js';
 import { foodAndMateAttract } from '../src/attract.js';
 import { clampf, rnd, lag } from '../src/util.js';
 
@@ -526,6 +526,23 @@ api.onCommand((c) => {
     case 'spawnMate': spawnMate(rnd(-bounds.width / 4, bounds.width / 4),
                                  rnd(-bounds.height / 4, bounds.height / 4)); break;
     case 'clearZones': clearZones(); break;
+    case 'setTheme': {
+      // Phase A: switch FLY_THEME globally and rebuild every live Fly's body.
+      // Materials are baked into the meshes, so a theme swap means re-running
+      // buildFlyModel(); setTheme() in flymodel.js mutates the global first.
+      const ok = setTheme(c.theme);
+      if (!ok) { console.warn('[overlay] unknown theme', c.theme); break; }
+      for (const fly of flies) fly.applyTheme();
+      break;
+    }
+    case 'setSize': {
+      // Phase A: re-apply the global scale to every live Fly. The fly's
+      // current `alt` is preserved across the swap so a flying fly stays
+      // flying — we only re-set root.scale, not position/state.
+      setScale(c.size);
+      for (const fly of flies) fly.applyScale();
+      break;
+    }
     case 'punish': trainerAction(c.target, -1); break;
     case 'resetTraining': if (sim) { sim.resetPlasticity(); api.clearMemories(); } break;
     case 'enablePlasticity': if (sim) {

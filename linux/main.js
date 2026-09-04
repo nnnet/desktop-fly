@@ -74,6 +74,12 @@ const cfgPlasticity  = argValue('plasticity') || process.env.FLY_PLASTICITY || '
 const cfgPlasticEta  = numFlag('plasticity-eta',  'FLY_PLASTIC_ETA',  1e-4);
 const cfgPlasticAlpha = numFlag('plasticity-alpha', 'FLY_PLASTIC_ALPHA', 1e-7);
 
+// Phase A: fly appearance overrides. fly-theme is a name from FLY_THEMES
+// (orange, cyan, magenta, yellow, green, fruitfly). fly-size is a multiplier
+// on the body scale; clamped to [0.3, 5.0] in flymodel.setScale.
+const cfgFlyTheme = (argValue('fly-theme') || process.env.FLY_THEME || 'orange').toLowerCase();
+const cfgFlySize  = numFlag('fly-size', 'FLY_SIZE', 1.0);
+
 // ----- Pure helpers (exported for tests) -----
 
 /**
@@ -106,14 +112,21 @@ export function planOverlays(allDisplays, activeDisplayId) {
  *   onSpawnSugar: () => void,
  *   onSpawnMate: () => void,
  *   onClearZones: () => void,
+ *   onSetTheme: (name: string) => void,
+ *   onSetSize: (size: number) => void,
  *   onQuit: () => void,
  *   activeDisplayId: number,
  *   displayCount: number,
  *   paused: boolean,
  *   brainVisible: boolean,
+ *   currentTheme: string,
+ *   currentSize: number,
  * }} ctx
  */
 export function buildTrayMenu(ctx) {
+  // Theme options — must match FLY_THEMES keys in flymodel.js.
+  const themeNames = ['orange', 'fruitfly', 'cyan', 'magenta', 'yellow', 'green'];
+  const sizeOptions = [0.5, 1.0, 1.5, 2.0, 3.0];
   return Menu.buildFromTemplate([
     { label: 'DesktopFly (Linux)', enabled: false },
     { type: 'separator' },
@@ -123,6 +136,21 @@ export function buildTrayMenu(ctx) {
       label: 'Send Fly to Next Display',
       visible: ctx.displayCount > 1,
       click: ctx.onMove,
+    },
+    { type: 'separator' },
+    {
+      label: 'Theme',
+      submenu: themeNames.map((n) => ({
+        label: n.charAt(0).toUpperCase() + n.slice(1) + (n === ctx.currentTheme ? '  ✓' : ''),
+        click: () => ctx.onSetTheme(n),
+      })),
+    },
+    {
+      label: 'Size',
+      submenu: sizeOptions.map((s) => ({
+        label: s + 'x' + (Math.abs(s - ctx.currentSize) < 0.01 ? '  ✓' : ''),
+        click: () => ctx.onSetSize(s),
+      })),
     },
     { type: 'separator' },
     {
@@ -188,6 +216,14 @@ export function createOverlayWindow(display, linuxDir, hidden) {
   // there is not git-tracked), so we must NOT use resolve(linuxDir, ...).
   const rendererDir = resolve(linuxDir, '..', 'windows', 'renderer');
   win.loadFile(resolve(rendererDir, 'overlay.html'));
+  // Phase A: apply the requested theme + size before the first frame paints
+  // so the user never sees the default orange/1.0 flash. retarget below
+  // triggers the renderer to size the camera, and these cmds set the look.
+  win.webContents.once('did-finish-load', () => {
+    if (win.isDestroyed()) return;
+    win.webContents.send('cmd', { name: 'setTheme', theme: cfgFlyTheme });
+    win.webContents.send('cmd', { name: 'setSize', size: cfgFlySize });
+  });
   // Pipe renderer console so we can debug the overlay from the terminal
   // without opening DevTools. The renderer forwards all console.* through
   // the flyAPI.sendLog IPC channel and the preload exposes it.
@@ -212,6 +248,10 @@ let brainWindow = null;      // separate 340x300 panel that shows spike flashes
 let activeDisplayId = null;
 let paused = false;
 let brainVisible = true;
+// Phase A: runtime-mutable fly appearance. Initialized from CLI/env so the
+// first frame already has the right look; the tray mutates these on click.
+let currentTheme = cfgFlyTheme;
+let currentSize  = cfgFlySize;
 
 /**
  * The brain panel. Same shape as windows/main.js#createBrain: 340x300, top-right
@@ -477,11 +517,23 @@ function refreshTray() {
     onSpawnSugar: () => broadcastCmd({ name: 'spawnSugar' }),
     onSpawnMate: () => broadcastCmd({ name: 'spawnMate' }),
     onClearZones: () => broadcastCmd({ name: 'clearZones' }),
+    onSetTheme: (name) => {
+      currentTheme = name;
+      broadcastCmd({ name: 'setTheme', theme: name });
+      refreshTray();
+    },
+    onSetSize: (size) => {
+      currentSize = size;
+      broadcastCmd({ name: 'setSize', size });
+      refreshTray();
+    },
     onQuit: () => { app.isQuitting = true; app.quit(); },
     activeDisplayId,
     displayCount: allDisplays.length,
     paused,
     brainVisible,
+    currentTheme,
+    currentSize,
   }));
 }
 
@@ -544,6 +596,11 @@ async function runSnapshot(outPath) {
     width: 720, height: 720,
     screens: [{ id: 0, x0: 0, y0: 0, x1: 720, y1: 720 }],
   });
+  // Phase A: apply --fly-theme and --fly-size before first frame so the
+  // snapshot reflects the requested look. 800 ms sleep below gives the
+  // renderer time to consume these.
+  win.webContents.send('cmd', { name: 'setTheme', theme: cfgFlyTheme });
+  win.webContents.send('cmd', { name: 'setSize', size: cfgFlySize });
   // Wait for the renderer's first paint AND give addFly() a few frames to land.
   await new Promise(r => setTimeout(r, 800));
   const img = await win.webContents.capturePage();
