@@ -278,20 +278,24 @@ function pushAmbientToAll() {
 setInterval(pushAmbientToAll, 500);
 
 function pushRetargetToAll() {
-  // The renderer uses retarget to size the ortho camera to the active display
-  // and to know screen rectangles (for fly initial placement).
-  const primary = screen.getPrimaryDisplay();
-  const size = {
-    width: primary.bounds.width,
-    height: primary.bounds.height,
-    screens: screen.getAllDisplays().map(d => ({
-      id: d.id,
-      x0: d.bounds.x, y0: d.bounds.y,
-      x1: d.bounds.x + d.bounds.width,
-      y1: d.bounds.y + d.bounds.height,
-    })),
-  };
-  for (const win of windows.values()) win.webContents.send('retarget', size);
+  // The renderer uses retarget to size the ortho camera to *its own* display
+  // and to know screen rectangles (for fly initial placement). Sending a
+  // single primary.bounds size to every per-monitor overlay made the canvas
+  // the wrong shape on every non-primary display — squashed, off-centre, or
+  // stretched — and on a one-monitor box it just happened to look right
+  // because primary was the only one. Each window now gets its own bounds.
+  const allDisplays = screen.getAllDisplays();
+  const screens = allDisplays.map(d => ({
+    id: d.id,
+    x0: d.bounds.x, y0: d.bounds.y,
+    x1: d.bounds.x + d.bounds.width,
+    y1: d.bounds.y + d.bounds.height,
+  }));
+  for (const [id, win] of windows) {
+    if (win.isDestroyed()) continue;
+    const b = win.getBounds();
+    win.webContents.send('retarget', { width: b.width, height: b.height, screens });
+  }
 }
 
 ipcMain.handle('brain-data', () => brainData);
