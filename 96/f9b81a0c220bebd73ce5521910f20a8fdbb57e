@@ -1,0 +1,45 @@
+openspec/changes/fly-zone-per-kind-behaviour/proposal.md
+  s_c80a415793d991::t_aeddf555fb5ef0 1-85
+windows/src/flymodel.js
+  s_c80a415793d991::t_935cd484f2f9d4 801-811
+openspec/changes/fly-zone-per-kind-behaviour/specs/fly-zone-heading-always-on/spec.md
+  s_c80a415793d991::t_913f2ef4bc972d 43-48
+  s_c80a415793d991::t_84dfb58aee7b15 1-42
+windows/renderer/overlay.js
+  s_c80a415793d991::t_ff13191ce2cc7d 357-368
+  s_c80a415793d991::t_038433dd2fcefd 320-322,324-327
+  s_c80a415793d991::t_7083511f2dd966 12
+  s_c80a415793d991::t_c6313f65c1c56a 565-580
+openspec/changes/fly-zone-per-kind-behaviour/design.md
+  s_c80a415793d991::t_b29ffae1c318e7 1-122
+windows/test/zone-motion.test.js
+  s_c80a415793d991::t_bc8bd3819f9996 169-171,177-179,185-186
+  s_c80a415793d991::t_6bfe7efd38a0fd 1-2,6-7
+  s_c80a415793d991::t_05de685e9d48fd 113-168,172-176,180-184,187-192
+openspec/changes/fly-zone-per-kind-behaviour/.openspec.yaml
+  s_c80a415793d991::t_9136363708beaa 1-2
+openspec/changes/fly-zone-per-kind-behaviour/specs/fly-zone-per-kind-motion/spec.md
+  s_c80a415793d991::t_8bd24d62cfb3b0 1-87
+  s_c80a415793d991::t_e190e15a9964e5 88-103
+openspec/changes/fly-zone-per-kind-behaviour/tasks.md
+  s_c80a415793d991::t_0d3b41a0662839 1-7,9-17,19-25,27-36,38-44,46-48,50-54,56-60,62-65,67-75,77-82,84-87,89-93,95-99,101,103,105-106,108
+  s_c80a415793d991::t_2493e7a6bbc1e5 8,18,26,37,45,49,55,61,66,76,83,88,94,100,102,104,107
+windows/src/zone-motion.js
+  s_c80a415793d991::t_f39126bdc8c4dc 5-7,9,15-16,22-24,33,59-177
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "96f9b81a0c220bebd73ce5521910f20a8fdbb57e",
+  "prompts": {},
+  "sessions": {
+    "s_c80a415793d991": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2d902537-236e-4079-aeca-c6e315116f31",
+        "model": "OpenRouter/minimax/minimax-m3:free"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    }
+  }
+}
