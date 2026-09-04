@@ -1,0 +1,44 @@
+windows/main.js
+  s_c80a415793d991::t_136773cdc10122 219
+windows/renderer/overlay.js
+  s_c80a415793d991::t_3480e0c03362ab 621
+  s_c80a415793d991::t_718c2ffa5310c4 327-330,335-337,340-342
+  s_c80a415793d991::t_2aecb43d245fca 12
+  s_c80a415793d991::t_be6a17c39afb0f 270-278,280-281,283-286,289-294,296-297,299-300,302,307-309,320-326,331-334,338-339,345,347
+  s_c80a415793d991::t_4c71ff50ec3467 690-695,697-700,703-704,706
+  s_c80a415793d991::t_183ee13ff76b15 317
+  s_c80a415793d991::t_a804330dbeab3d 429,433-441,689
+  s_c80a415793d991::t_6fbf4078c7027e 383-389,406-416
+  s_c80a415793d991::t_692ce02a6bda15 113-118
+  s_c80a415793d991::t_f3a5ed75ed952d 696,701-702,705
+  s_c80a415793d991::t_075bddd1f9eb5c 343-344
+  s_c80a415793d991::t_c96326adfaa2c7 707
+linux/main.js
+  s_c80a415793d991::t_a44ad992319057 113
+  s_c80a415793d991::t_c19ce364872a12 616
+  s_c80a415793d991::t_532c7f379c1ec7 170
+windows/test/zone-motion.test.js
+  s_c80a415793d991::t_3502e3ad1b9edb 1-112
+linux/package.json
+  s_c80a415793d991::t_d03a2fd1643b5c 13-14
+windows/src/zone-motion.js
+  s_c80a415793d991::t_14016488dd0ddc 1-55
+linux/test/zone-motion.test.js
+  s_c80a415793d991::t_eed6c482d9d065 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "f18f514cf92b7dba7ff005bc3196ac5879a633ef",
+  "prompts": {},
+  "sessions": {
+    "s_c80a415793d991": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2d902537-236e-4079-aeca-c6e315116f31",
+        "model": "OpenRouter/minimax/minimax-m3:free"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    }
+  }
+}
