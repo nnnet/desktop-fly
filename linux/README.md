@@ -140,25 +140,52 @@ placeholder when the snapshot is missing or empty.
 
 The tray has a **Game** submenu:
 
-- **Spawn Sugar Zone** — drops a yellow circle on the active display.
-  The fly orients toward it via a tarsal-contact gradient; on contact
+- **Spawn Sugar Zone** — drops a yellow circle. Every zone wanders:
+  it picks a new target every 4–10 s, lerps toward it at 30 pt/s,
+  and 15 % of the repicks aim within 200 pt of the fly. The fly
+  orients toward the sugar via a tarsal-contact gradient; on contact
   the sugar disappears, the brain receives a `fwd + groom` reward
   pulse, and Hebbian LTP grows the edges that delivered the success.
   The fly's `sugarLevel` is restored on every eat (sugar is the only
   user-spawnable resource; it never respawns on its own). Above
   `sugarLevel ≥ 0.2` the fly chases sugar; below, the fly ignores it
   and goes hungry until you spawn more.
-- **Spawn Predator** — drops a red octagon. The fly rotates away from
-  the predator, gets a temporary speed boost (up to 1.5× within the
-  predator's 900 pt range), and the predator proximity feeds an
-  `escapeTeach` signal to the sim. With plasticity on, this drives
-  Hebbian LTD on the sensory→giant-fiber edges so the fly learns to
-  filter false alarms after repeated exposure. Predator zones do not
-  consume on contact.
-- **Spawn Mate** — drops a slowly-moving pink glow. The fly steers
-  toward it; close approach fires wing-extension (courtship surrogate).
+- **Spawn Near Fly** — drops a sugar zone within 50–200 pt of the
+  fly at a random angle. The deterministic demo entry: you can
+  verify sugar-reach behaviour immediately, without waiting for the
+  random chase-bias branch to fire.
+- **Spawn Predator** — drops a red octagon. Wanders at 50 pt/s with
+  a 40 % chase-the-fly bias. The fly rotates away from the predator,
+  gets a temporary speed boost (up to 1.5× within the predator's
+  900 pt range), and the predator proximity feeds an `escapeTeach`
+  signal to the sim. With plasticity on, this drives Hebbian LTD
+  on the sensory→giant-fiber edges so the fly learns to filter false
+  alarms after repeated exposure. Predator zones do not consume on
+  contact.
+- **Spawn Mate** — drops a slowly-moving pink glow. Wanders at
+  20 pt/s with a 25 % chase-the-fly bias. The fly steers toward it;
+  close approach (60 pt) fires wing-extension (courtship surrogate).
   The mate never disappears.
 - **Clear Zones** — removes all food, mate, and predator zones.
+
+### What you see on contact
+
+The renderer logs a single line per (zone, fly) the first time they
+contact — visible in the launcher's terminal:
+
+```
+[zone] sugar reach id=7 fly=#0 d=14 bias=0.957
+[zone] mate close id=3 fly=#0 d=42 bias=0.218
+[zone] predator loom id=11 fly=#0 d=480 bias=-0.182
+```
+
+Reactions you should observe on screen:
+
+| Contact | Visible reaction |
+|---|---|
+| Sugar reach | sugar disappears; brief wing raise (proboscis extension surrogate); brain receives reward pulse on DNp09 (walk) and DNg11 (groom) |
+| Mate close | wing raise (courtship posture); wing extension via DNp02/04/11; brain state line shows `court` |
+| Predator within 900 pt | fly turns away, speeds up; the predator closes in and the fly accelerates; plasticity window applies Hebbian LTD on sensory→escape edges |
 
 Leave **Enable Hebbian plasticity** on while you hunt sugar and the
 brain snapshots its weight matrix to `~/.config/desktop-fly/food-memories.json`

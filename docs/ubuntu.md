@@ -195,7 +195,14 @@ empty.
 
 ## Game mode (food, mate, predator)
 
-The tray has a **Game** submenu with four entries:
+The tray has a **Game** submenu with five entries:
+
+All three zone kinds **wander**: every 4–10 s they pick a new
+target and lerp toward it (sugar 30 pt/s, mate 20 pt/s, predator
+50 pt/s). A per-kind chase-bias — sugar 15 %, mate 25 %, predator
+40 % — picks a point within 200 pt of the fly instead of a uniform
+display point. So within a normal session the zones interact with
+the fly multiple times.
 
 - **Spawn Sugar Zone** — drops a yellow circle on the active display.
   The fly orients toward it via a tarsal-contact gradient; on contact
@@ -206,6 +213,10 @@ The tray has a **Game** submenu with four entries:
   sugar, below it the fly ignores sugar and goes hungry until you
   spawn more. **Sugar never respawns on its own** — the user is the
   only source of new zones.
+- **Spawn Near Fly** — drops a sugar zone within 50–200 pt of the
+  fly at a random angle. The deterministic demo entry: you can
+  verify sugar-reach behaviour immediately, without waiting for
+  the random chase-bias branch to fire.
 - **Spawn Predator** — drops a red octagon. The fly rotates away,
   gets a temporary speed boost (up to 1.5× within 900 pt), and the
   proximity feeds an `escapeTeach` signal to the sim. With plasticity
@@ -215,6 +226,25 @@ The tray has a **Game** submenu with four entries:
   toward it; close approach fires wing-extension (courtship surrogate).
   The mate never disappears; **Clear Zones** wipes everything.
 - **Clear Zones** — removes all food, mate, and predator zones.
+
+### What you see on contact
+
+The renderer logs a single line per (zone, fly) the first time they
+contact — visible in the launcher's terminal:
+
+```
+[zone] sugar reach id=7 fly=#0 d=14 bias=0.957
+[zone] mate close id=3 fly=#0 d=42 bias=0.218
+[zone] predator loom id=11 fly=#0 d=480 bias=-0.182
+```
+
+Reactions you should observe on screen:
+
+| Contact | Visible reaction |
+|---|---|
+| Sugar reach | sugar disappears; brief wing raise (proboscis extension surrogate); brain receives reward pulse on DNp09 (walk) and DNg11 (groom) |
+| Mate close | wing raise (courtship posture); wing extension via DNp02/04/11; brain state line shows `court` |
+| Predator within 900 pt | fly turns away, speeds up; the predator closes in and the fly accelerates; plasticity window applies Hebbian LTD on sensory→escape edges |
 
 The trainer submenu still has **Enable Hebbian plasticity** — leave it
 on while you hunt sugar, and the brain snapshots its weight matrix to
