@@ -12,6 +12,51 @@ import * as THREE from '../node_modules/three/build/three.module.js';
 
 const api = window.flyAPI;
 const labelEl = document.getElementById('label');
+const stateTagEl = document.querySelector('#state-line .tag');
+const stateRatesEl = document.querySelector('#state-line .rates');
+
+// Typical-max Hz for each of the nine populations the brain state line
+// shows. The renderer divides the live rate by this number to normalise
+// to [0, 1] (capped). The values are conservative: a typical loom burst
+// peaks at ~180 Hz on LC4 (so 250 leaves headroom for an extra-strong
+// loom); the rest are tuned to leave the steady-state above 0.05 and
+// a typical burst below 1.0. Spec: brain-state-readout "Numeric rates
+// for nine populations".
+const RATE_TYP_MAX = {
+  LC4:   250,
+  LPLC2: 250,
+  GF:    30,    // GF only spikes a few times per escape; per-neuron Hz is small
+  DNa01: 60,
+  DNa02: 60,
+  DNp09: 50,
+  DNg11: 100,
+  MDN:   50,
+  escW:  60,
+};
+const RATE_ORDER = ['LC4', 'LPLC2', 'GF', 'DNa01', 'DNa02', 'DNp09', 'DNg11', 'MDN', 'escW'];
+
+function fmt3(v) {
+  // Clamp to [0, 1] and render with 3-decimal precision. Spec: brain-state-readout
+  // "3-decimal precision".
+  const x = Math.max(0, Math.min(1, v));
+  return x.toFixed(3);
+}
+
+function renderState(payload) {
+  if (!payload) return;
+  stateTagEl.textContent = payload.tag || '—';
+  if (payload.rates) {
+    stateRatesEl.textContent = RATE_ORDER.map((k) => {
+      const hz = payload.rates[k] || 0;
+      return `${k}=${fmt3(hz / RATE_TYP_MAX[k])}`;
+    }).join('  ');
+  }
+}
+
+// onState: throttled brain state readout from the overlay renderer. We
+// just re-render the line — there's no animation or canvas update
+// involved. Spec: brain-state-readout.
+if (api.onState) api.onState((p) => renderState(p));
 
 // super_class palette (index order from etl.py)
 const CLASS_COLORS = [

@@ -62,6 +62,10 @@ export class LIFSim {
 
     // groups
     this.loomLeft = []; this.loomRight = [];
+    // Per-type loom neuron indices for the brain state line. The combined
+    // loomLeft+loomRight count remains in `rateLoom`; the per-type rates
+    // are tracked separately so the UI can show LC4 vs LPLC2.
+    this.loomLC4 = []; this.loomLPLC2 = [];
     this.gf = [];
     this.dnaL = []; this.dnaR = [];
     this.mdn = []; this.fwd = []; this.groom = []; this.escw = [];
@@ -71,7 +75,9 @@ export class LIFSim {
       const nr = neurons[i];
       switch (nr.role) {
         case 'lc4': case 'lplc2':
-          (nr.side === 'left' ? this.loomLeft : this.loomRight).push(i); break;
+          (nr.side === 'left' ? this.loomLeft : this.loomRight).push(i);
+          (nr.role === 'lc4' ? this.loomLC4 : this.loomLPLC2).push(i);
+          break;
         case 'gf': this.gf.push(i); break;
         case 'dna01': case 'dna02':
           (nr.side === 'left' ? this.dnaL : this.dnaR).push(i); break;
@@ -119,6 +125,11 @@ export class LIFSim {
     for (const i of this.escw) this.roleCode[i] = 7;
     for (const i of this.gf) this.roleCode[i] = 8;
 
+    // Sets for LC4 vs LPLC2 split (used in the per-spike switch — we keep
+    // them on the sim so we don't recompute the Set per spike).
+    this._loomLC4Set = new Set(this.loomLC4);
+    this._loomLPLC2Set = new Set(this.loomLPLC2);
+
     // CSR adjacency, weights pre-scaled
     const edges = circuit.edges;
     const counts = new Int32Array(n);
@@ -155,6 +166,9 @@ export class LIFSim {
 
     // outputs
     this.rateLoom = 0;       // Hz per LC neuron (EMA)
+    this.rateLC4 = 0;        // Hz per LC4 neuron (EMA, separate from rateLoom)
+    this.rateLPLC2 = 0;      // Hz per LPLC2 neuron (EMA)
+    this.rateGF = 0;         // Hz per GF neuron (EMA)
     this.rateDNaL = 0;
     this.rateDNaR = 0;
     this.rateMDN = 0;
@@ -225,6 +239,15 @@ export class LIFSim {
     this.plasticEnabled = true;
     this.plasticLastMs = 0;
     this.plasticEdgesTouched = 0;
+    this.escapeTeach = 0;
+  }
+  // setEscapeTeach(v ∈ [0,1]): the fly's current predator-proximity
+  // signal. Applied as additional LTD on sens -> escape (sensory ->
+  // giant-fiber) edges during the next plasticity step. The renderer
+  // calls this every frame with the latest fly.escapeTeach value.
+  // Spec: fly-predator-zones "Predator exposure teaches escape".
+  setEscapeTeach(v) {
+    this.escapeTeach = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;
   }
   disablePlasticity() { this.plasticEnabled = false; }
   resetPlasticity() {
@@ -333,22 +356,43 @@ export class LIFSim {
 
       // group rates (Hz per neuron, EMA)
       let cLoom = 0, cDL = 0, cDR = 0, cM = 0, cF = 0, cG = 0, cW = 0;
+      let cLC4 = 0, cLPLC2 = 0, cGF = 0;
+      // Lookup which loom neurons belong to LC4 vs LPLC2 once per step;
+      // the per-spike path is hot so we keep the membership test to a
+      // single Uint8Array flag.
       for (let s = 0; s < nSpiked; s++) {
-        switch (this.roleCode[spiked[s]]) {
-          case 1: cLoom++; break;
-          case 2: cDL++; break;
-          case 3: cDR++; break;
-          case 4: cM++; break;
-          case 5: cF++; break;
-          case 6: cG++; break;
-          case 7: cW++; break;
-          case 8: this.gfLatch = true; break;
-          default: break;
+        const i = spiked[s];
+        const code = this.roleCode[i];
+        if (code === 1) {
+          cLoom++;
+          // loomLC4 / loomLPLC2 membership is stable for the lifetime of
+          // the sim; we use a Set per side for O(1) membership. For
+          // performance we trade a tiny bit of memory for the
+          // membership flag.
+          if (this._loomLC4Set && this._loomLC4Set.has(i)) cLC4++;
+          else if (this._loomLPLC2Set && this._loomLPLC2Set.has(i)) cLPLC2++;
+        } else {
+          switch (code) {
+            case 2: cDL++; break;
+            case 3: cDR++; break;
+            case 4: cM++; break;
+            case 5: cF++; break;
+            case 6: cG++; break;
+            case 7: cW++; break;
+            case 8: this.gfLatch = true; cGF++; break;
+            default: break;
+          }
         }
       }
       const a = this.rateAlpha;
       const nLoom = Math.max(1, this.loomLeft.length + this.loomRight.length);
       this.rateLoom += (cLoom * 1000 / nLoom - this.rateLoom) * a;
+      const nLC4 = Math.max(1, this.loomLC4.length);
+      const nLPLC2 = Math.max(1, this.loomLPLC2.length);
+      this.rateLC4 += (cLC4 * 1000 / nLC4 - this.rateLC4) * a;
+      this.rateLPLC2 += (cLPLC2 * 1000 / nLPLC2 - this.rateLPLC2) * a;
+      const nGF = Math.max(1, this.gf.length);
+      this.rateGF += (cGF * 1000 / nGF - this.rateGF) * a;
       this.rateDNaL += (cDL * 1000 / Math.max(1, this.dnaL.length) - this.rateDNaL) * a;
       this.rateDNaR += (cDR * 1000 / Math.max(1, this.dnaR.length) - this.rateDNaR) * a;
       this.rateMDN += (cM * 1000 / Math.max(1, this.mdn.length) - this.rateMDN) * a;
@@ -406,6 +450,32 @@ export class LIFSim {
           } else {
             if (this.w[k] > 0) this.w[k] = 0;
             else if (this.w[k] < 2 * w0k) this.w[k] = 2 * w0k;
+          }
+        }
+        // Predator teach signal: extra LTD on sens -> gf edges when the
+        // fly is exposed to a predator. escapeTeach is a multiplier in
+        // [0, 1]. We apply it as a multiplicative decay on those edges
+        // at the same per-step rate as the homeostatic alpha (1e-7/step),
+        // scaled by teach * 1000 so 30 s of full exposure shifts the
+        // sens->gf edges by a few percent (within the 50% floor the
+        // plasticity probe checks). Spec: fly-predator-zones "Predator
+        // exposure teaches escape".
+        if (this.escapeTeach > 0 && this.sens && this.sens.length && this.gf && this.gf.length) {
+          const teach = this.escapeTeach;
+          // Per-step shrink on sens->gf edges: w *= (1 - alpha * 100 * teach).
+          // This is roughly 100x faster than homeostatic decay at teach=1,
+          // i.e. ~3% over 30 s with default alpha=1e-7. Tune via the test,
+          // not by guess.
+          const shrink = 1 - this.plasticAlpha * 100 * teach;
+          const gfSet = new Set(this.gf);
+          for (let i = 0; i < this.sens.length; i++) {
+            const pre = this.sens[i];
+            const end = this.rowStart[pre + 1];
+            for (let k = this.rowStart[pre]; k < end; k++) {
+              if (gfSet.has(this.colIdx[k]) && this.w[k] > 0) {
+                this.w[k] *= shrink;
+              }
+            }
           }
         }
         this.plasticEdgesTouched += touched;

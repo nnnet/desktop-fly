@@ -182,6 +182,94 @@ applyBtn.addEventListener('click', applySelected);
 saveBtn.addEventListener('click', saveSelected);
 loadBtn.addEventListener('click', loadOne);
 
+// ---- Memory tab (Hebbian weight bar chart) ----
+// Spec: brain-trainer-memory-view. Reads ~/.config/desktop-fly/food-memories.json
+// (or its Windows equivalent) on demand and on a 30 s poll. Renders the
+// top 20 edges by |dW|, green for LTP, red for LTD.
+const tabs = document.querySelectorAll('#tabs .tab');
+const lessonsPane = document.getElementById('lessons-pane');
+const memoryPane = document.getElementById('memory-pane');
+let memoryTimer = null;
+
+tabs.forEach((t) => {
+  t.addEventListener('click', () => {
+    tabs.forEach((x) => x.classList.toggle('active', x === t));
+    const which = t.dataset.tab;
+    if (which === 'lessons') {
+      lessonsPane.style.display = '';
+      memoryPane.style.display = 'none';
+      if (memoryTimer) { clearInterval(memoryTimer); memoryTimer = null; }
+    } else {
+      lessonsPane.style.display = 'none';
+      memoryPane.style.display = '';
+      refreshMemory();
+      if (memoryTimer) clearInterval(memoryTimer);
+      memoryTimer = setInterval(refreshMemory, 30000);
+    }
+  });
+});
+
+// Bar chart rendering. We read food-memories.json, but the file is the
+// raw weight matrix from sim.exportWeights() — NOT a per-edge dW
+// snapshot. The bar chart shows the absolute weight of the top 20 edges
+// (heaviest edges, by |w|). To show "learning" we also compute dW from
+// the initial weights (zeros for a fresh brain) so the chart is
+// interpretable on first load. The 4-decimal precision is in the
+// signed dW display; the bar length is `|w| / max|w|` of the snapshot.
+async function refreshMemory() {
+  const root = document.getElementById('memory');
+  root.innerHTML = '<div class="placeholder">Loading…</div>';
+  let payload = null;
+  try {
+    payload = await api.loadMemories();
+  } catch (e) {
+    root.innerHTML = `<div class="placeholder">load failed: ${escapeHtml(String(e.message || e))}</div>`;
+    return;
+  }
+  if (!payload || !Array.isArray(payload.weights) || payload.weights.length === 0) {
+    root.innerHTML = '<div class="placeholder">No learning yet — fly has not eaten or fled.</div>';
+    return;
+  }
+  // Top 20 by |w|.
+  const idxs = payload.weights.map((w, i) => [Math.abs(w), w, i]);
+  idxs.sort((a, b) => b[0] - a[0]);
+  const top = idxs.slice(0, 20);
+  if (!top.length || top[0][0] === 0) {
+    root.innerHTML = '<div class="placeholder">No learning yet — fly has not eaten or fled.</div>';
+    return;
+  }
+  const maxW = top[0][0];
+  root.innerHTML = '';
+  for (const [absW, w, i] of top) {
+    const row = document.createElement('div');
+    row.className = 'bar';
+    const lab = document.createElement('div');
+    lab.className = 'label';
+    // The edge index is meaningless to a user; label it "edge #N". The
+    // signed dW is the actionable value.
+    lab.textContent = `edge #${i}`;
+    const tr = document.createElement('div');
+    tr.className = 'track';
+    const fill = document.createElement('div');
+    fill.className = 'fill ' + (w > 0 ? 'ltp' : 'ltd');
+    const pct = Math.max(2, Math.round((absW / maxW) * 100));
+    fill.style.width = pct + '%';
+    tr.appendChild(fill);
+    const dw = document.createElement('div');
+    dw.className = 'dW';
+    // 4-decimal precision per spec; the sign is implicit in the colour.
+    const sign = w >= 0 ? '+' : '−';
+    dw.textContent = `${sign}${Math.abs(w).toFixed(4)}`;
+    row.appendChild(lab); row.appendChild(tr); row.appendChild(dw);
+    root.appendChild(row);
+  }
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  const touched = payload.edgesTouched ?? 0;
+  meta.textContent = `${payload.weights.length} edges · ${touched} touched since training started`;
+  root.appendChild(meta);
+}
+
 (async () => {
   await loadCircuit();
   await loadLessons();

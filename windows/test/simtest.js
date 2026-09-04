@@ -150,6 +150,61 @@ console.log(`plasticity 30s (eta=1e-3): max dW ${maxDelta.toExponential(2)}`
 let pass = gfSpont === 0 && gfLoom > 0 && walkOn > 0 && gfStim && siestaPct > 3
   && silenceWorks && plasticWorks;
 
+// Phase 11: predator escapeTeach. With plasticity on and a constant
+// escapeTeach=1, the average weight of sens->gf edges should DECREASE
+// over 30 s (the predator proximity teaches the fly to gate escape
+// through this pathway). Spec: fly-predator-zones "Predator exposure
+// teaches escape". The 50% floor is a separate scenario below.
+{
+  const simPred = new LIFSim(data.circuit, null);
+  const baseW = simPred.exportWeights();
+  // Sum baseline weight of every sens -> gf edge.
+  const sensIdx = simPred.sens || [];
+  const gfIdx = simPred.gf || [];
+  let baseSensGf = 0;
+  if (sensIdx.length && gfIdx.length) {
+    const gfSet = new Set(gfIdx);
+    for (let i = 0; i < sensIdx.length; i++) {
+      const pre = sensIdx[i];
+      const end = simPred.rowStart[pre + 1];
+      for (let k = simPred.rowStart[pre]; k < end; k++) {
+        if (gfSet.has(simPred.colIdx[k])) baseSensGf += baseW[k];
+      }
+    }
+  }
+  simPred.enablePlasticity({ eta: 1e-3, alpha: 1e-7, stepMs: 100 });
+  simPred.setEscapeTeach(1.0);    // full exposure
+  for (let ms = 0; ms < 30000; ms++) simPred.step(1);
+  const trainedW = simPred.exportWeights();
+  let trainedSensGf = 0;
+  if (sensIdx.length && gfIdx.length) {
+    const gfSet = new Set(gfIdx);
+    for (let i = 0; i < sensIdx.length; i++) {
+      const pre = sensIdx[i];
+      const end = simPred.rowStart[pre + 1];
+      for (let k = simPred.rowStart[pre]; k < end; k++) {
+        if (gfSet.has(simPred.colIdx[k])) trainedSensGf += trainedW[k];
+      }
+    }
+  }
+  // Pre-train: avg per edge; post-train: avg per edge; LTD is visible.
+  const baseAvg = baseSensGf / Math.max(1, sensIdx.length * gfIdx.length);
+  const trainedAvg = trainedSensGf / Math.max(1, sensIdx.length * gfIdx.length);
+  const ltdWorks = baseSensGf > 0 && trainedSensGf < baseSensGf;
+  // 50% floor: even after continuous exposure the average must stay above
+  // 50% of baseline (the plasticity alpha decay and the [0, 2*w0] clamp
+  // bound the drift).
+  const floor = 0.5 * baseSensGf;
+  const aboveFloor = trainedSensGf >= floor;
+  console.log(`predator teach 30s: sens->gf sum ${baseSensGf.toExponential(2)} -> `
+    + `${trainedSensGf.toExponential(2)} (avg ${baseAvg.toExponential(2)} -> `
+    + `${trainedAvg.toExponential(2)}, floor ${floor.toExponential(2)})`
+    + (ltdWorks ? '' : ' (no LTD fired)')
+    + (aboveFloor ? '' : ' (BELOW 50% floor — clamp/decay broken)'));
+  if (!ltdWorks) pass = false;
+  if (!aboveFloor) pass = false;
+}
+
 // Phase 9: food reward pathway. The renderer delivers a sugar reach as
 // sim.stimulate(sim.fwd, 0.5, 300) + sim.stimulate(sim.groom, 0.3, 200).
 // Run that once, then 1 s of free sim, and assert both DNp09 (rateFwd)

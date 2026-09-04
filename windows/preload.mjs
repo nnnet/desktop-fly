@@ -23,10 +23,19 @@ contextBridge.exposeInMainWorld('flyAPI', {
   onCommand: on('cmd'),
   onRetarget: on('retarget'),
   onStimulate: on('stimulate'),
+  // boot-config: the initial cfg (size, theme) sent by the main process
+  // immediately on `did-finish-load`, BEFORE the renderer creates any
+  // Fly. The renderer waits for this event before addFly() so the first
+  // frame already has the right scale/theme — no visible size jump.
+  onBootConfig: on('boot-config'),
   sendSpikes: (list) => ipcRenderer.send('spikes', list),
+  // Brain state readout (throttled to 10 Hz). The main process fans this
+  // out to every brain window. Spec: brain-state-readout.
+  sendState: (payload) => ipcRenderer.send('state', payload),
 
   // brain renderer
   onSpikes: on('spikes'),
+  onState: on('state'),
   stimulate: (req) => ipcRenderer.send('stimulate', req),
 
   // Hebbian food-memories persistence

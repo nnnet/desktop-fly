@@ -8,7 +8,7 @@ import * as THREE from '../node_modules/three/build/three.module.js';
 import { LIFSim, SpikeBus } from '../src/sim.js';
 import { SignalBuilder } from '../src/signals.js';
 import { Fly, SHADOWS_ENABLED, setEscapeRateMul, setTheme, setScale } from '../src/flymodel.js';
-import { foodAndMateAttract } from '../src/attract.js';
+import { zoneAttract, PREDATOR_RANGE_PT } from '../src/attract.js';
 import { clampf, rnd, lag } from '../src/util.js';
 
 const api = window.flyAPI;
@@ -130,6 +130,10 @@ let tempo = 1;
 let plasticEnabled = false;    // mirrors sim state for the save timer
 let lastSaveMs = 0;            // performance.now() of last Hebbian snapshot
 const SAVE_INTERVAL_MS = 30000;
+// Brain state readout throttle. Spec: brain-state-readout "Update cadence"
+// caps the readout at 10 Hz so the DOM doesn't churn at 60 fps.
+let lastStateMs = 0;
+const STATE_MIN_INTERVAL_MS = 100;
 let activity = 1;
 let windowLoomL = 0;
 let windowLoomR = 0;
@@ -291,6 +295,25 @@ function spawnMate(x, y) {
   return z.id;
 }
 
+// Predator: a red octagon. Unlike sugar/mate, predator zones do not
+// consume on contact; they bias the fly's heading away and boost its
+// speed while within PREDATOR_RANGE_PT. The fly.escapeTeach signal is
+// forwarded to the sim so plasticity can apply sens->gf LTD.
+// Spec: fly-predator-zones.
+function spawnPredator(x, y) {
+  const z = { id: zoneIdSeq++, kind: 'predator', x, y, r: 50, mesh: null, born: performance.now() };
+  // Octagon shape via CircleGeometry with 8 segments; the radial fan
+  // approximates an octagon well at 50 pt radius.
+  z.mesh = new THREE.Mesh(
+    new THREE.CircleGeometry(z.r, 8),
+    new THREE.MeshBasicMaterial({ color: 0xb8232c, transparent: true, opacity: 0.75, depthWrite: false }),
+  );
+  z.mesh.position.set(x, y, 0.45);
+  scene.add(z.mesh);
+  zones.push(z);
+  return z.id;
+}
+
 function clearZones() {
   for (const z of zones) {
     if (z.mesh) scene.remove(z.mesh);
@@ -319,6 +342,11 @@ function drawZones(t) {
       z.mesh.position.set(z.x, z.y, 0.5);
       const s = 1 + 0.15 * Math.sin(t * 4 + z.id);
       z.glow.scale.set(s, s, 1);
+    } else if (z.kind === 'predator') {
+      // menacing pulse: 6..10 Hz with a sharp attack
+      const s = 1 + 0.18 * (0.5 + 0.5 * Math.sin(t * 6 + z.id));
+      z.mesh.scale.set(s, s, 1);
+      z.mesh.material.opacity = 0.55 + 0.20 * (0.5 + 0.5 * Math.sin(t * 8 + z.id));
     }
   }
 }
@@ -326,8 +354,16 @@ function drawZones(t) {
 function checkReaches(fly) {
   if (!sim) return;
   if (!zones.length) return;
-  const out = foodAndMateAttract(fly, zones);
-  // Sugar reach: pump fwd + groom, remove the zone.
+  const out = zoneAttract(fly, zones);
+  // Satiety gate: a full or near-full fly ignores sugar (sugarLevel
+  // >= SUGAR_THRESHOLD multiplier on foodAttract). We implement this
+  // here rather than in attract.js because the gate is a renderer-only
+  // contract (sim has no idea about hunger).
+  // Spec: fly-satiety "Satiety gates food attraction".
+  if (fly.sugarLevel < 0.2) {
+    out.foodAttract = 0;
+  }
+  // Sugar reach: pump fwd + groom, remove the zone, restore hunger.
   if (out.foodReached !== null) {
     const i = zones.findIndex((z) => z.id === out.foodReached);
     if (i >= 0) {
@@ -339,15 +375,49 @@ function checkReaches(fly) {
       // Single brief stimulation — operant-conditioning pulse, not a sustained drive.
       sim.stimulate(sim.fwd, 0.5, 300);
       sim.stimulate(sim.groom, 0.3, 200);
+      // Satiety: restore hunger (clamped to 1) and raise the eat transient.
+      fly.eatSugar();
       // Animate: brief wing raise (proboscis extension surrogate via groom).
       fly.wingRaise = Math.min(1, fly.wingRaise + 0.7);
     }
   }
-  // Mate close approach: fire wing extension (DNp02/04/11).
+  // Mate close approach: fire wing extension (DNp02/04/11) + courting
+  // transient for the brain state line.
   if (out.mateClose) {
     sim.stimulate(sim.escw, 0.35, 600);
     fly.wingRaise = Math.min(1, fly.wingRaise + 0.4);
+    fly.onMateClose();
   }
+  // Predator proximity: feed the closest distance to the fly for the
+  // teach-signal computation, and apply the speed boost. The flymodel
+  // itself does not own the zone list, so the renderer is the natural
+  // place to find the closest predator. The teach signal is forwarded
+  // to the sim so plasticity can apply sens->gf LTD.
+  // Spec: fly-predator-zones "Predator proximity boosts flight speed" +
+  // "Predator exposure teaches escape".
+  let nearestD = Infinity;
+  for (const z of zones) {
+    if (z.kind !== 'predator') continue;
+    const d = Math.hypot(z.x - fly.pos.x, z.y - fly.pos.y);
+    if (d < nearestD) nearestD = d;
+  }
+  if (Number.isFinite(nearestD)) {
+    fly.onPredatorProximity(nearestD, PREDATOR_RANGE_PT);
+    // Speed boost: read the falloff and apply directly. We do NOT touch
+    // fly.speed here because the boost must apply this frame; instead we
+    // scale the fly's effective speed by a transient factor for one frame
+    // via a property the body update reads.
+    if (nearestD < PREDATOR_RANGE_PT) {
+      const k = 1 - nearestD / PREDATOR_RANGE_PT;
+      fly._predatorSpeedMul = 1 + 0.5 * k * k;
+    } else {
+      fly._predatorSpeedMul = 1;
+    }
+  } else {
+    fly.onPredatorProximity(Infinity, PREDATOR_RANGE_PT);
+    fly._predatorSpeedMul = 1;
+  }
+  if (sim) sim.setEscapeTeach(fly.escapeTeach);
   return out;
 }
 
@@ -452,6 +522,44 @@ function frame(tMs) {
       const events = spikeBus.popAll();
       if (events.length) api.sendSpikes(events);
     }
+    // Brain state readout (spec: brain-state-readout). The overlay owns
+    // the sim and the fly, so it forwards a throttled state+signals
+    // packet to the brain window for the single-line readout. Throttle
+    // to 10 Hz so the DOM doesn't churn at 60 fps.
+    if (first) {
+      const now = performance.now();
+      if (now - lastStateMs >= STATE_MIN_INTERVAL_MS) {
+        lastStateMs = now;
+        const sn = first.state;
+        // Transient tags take priority over the persistent state. The
+        // tag wins for as long as the transient timer is non-zero.
+        const tag =
+          first.eatingTimer > 0 ? 'eat' :
+          first.courtingTimer > 0 ? 'court' :
+          sn === 'walking' ? 'walk' :
+          sn === 'flying' ? 'flight' :
+          sn === 'grooming' ? 'groom' :
+          sn === 'idle' ? 'idle' :
+          sn === 'sleeping' ? 'sleep' : 'idle';
+        api.sendState({
+          tag,
+          // Nine population rates, 3-decimal precision after normalising
+          // by the typical-max table below. Spec: brain-state-readout
+          // "Numeric rates for nine populations".
+          rates: {
+            LC4:   sim ? sim.rateLC4   : 0,
+            LPLC2: sim ? sim.rateLPLC2 : 0,
+            GF:    sim ? sim.rateGF    : 0,
+            DNa01: sim ? sim.rateDNaL  : 0,
+            DNa02: sim ? sim.rateDNaR  : 0,
+            DNp09: sim ? sim.rateFwd   : 0,
+            DNg11: sim ? sim.rateGroom : 0,
+            MDN:   sim ? sim.rateMDN   : 0,
+            escW:  sim ? sim.rateEscW  : 0,
+          },
+        });
+      }
+    }
   }
 
   // Hebbian snapshot — only while plasticity is on and at most every 30 s.
@@ -465,11 +573,23 @@ function frame(tMs) {
   for (let i = 0; i < flies.length; i++) {
     flies[i].terrain = terrain;
     flies[i].zones = zones;     // game zones, for food/mate heading bias
-    flies[i].update(dt, bounds, mouseScene, i === 0 ? signals : null);
   }
+  // Reach check + zone draw first so the per-frame predator speed boost
+  // and the food/sugar/satiety state are applied to fly.speed BEFORE
+  // update() consumes it. The order matters: checkReaches sets
+  // fly._predatorSpeedMul; update() multiplies this frame's speed by it.
   if (first) {
     drawZones(t);
     checkReaches(first);
+  }
+  for (let i = 0; i < flies.length; i++) {
+    // Apply the predator speed boost for this frame only, then revert.
+    const fly = flies[i];
+    const origSpeed = fly.speed;
+    const sm = fly._predatorSpeedMul ?? 1;
+    if (sm !== 1) fly.speed = fly.speed * sm;
+    fly.update(dt, bounds, mouseScene, i === 0 ? signals : null);
+    if (sm !== 1) fly.speed = origSpeed;
   }
 
   renderer.render(scene, camera);
@@ -526,6 +646,13 @@ api.onCommand((c) => {
       // pick a random point within active-display bounds, well clear of the fly
       const hw = bounds.width / 2 - 80, hh = bounds.height / 2 - 80;
       spawnSugar(rnd(-hw, hw), rnd(-hh, hh));
+      break;
+    }
+    case 'spawnPredator': {
+      // Same placement rule as sugar; the predator is a stationary threat
+      // the user drops to challenge the fly.
+      const hw = bounds.width / 2 - 80, hh = bounds.height / 2 - 80;
+      spawnPredator(rnd(-hw, hw), rnd(-hh, hh));
       break;
     }
     case 'spawnMate': spawnMate(rnd(-bounds.width / 4, bounds.width / 4),
@@ -591,6 +718,39 @@ api.onStimulate((req) => {
   if (sim) sim.stimulate(req.indices, req.strength, req.durationMs);
 });
 
+// boot-config listener MUST be registered synchronously at module top —
+// BEFORE the IIFE awaits getBrainData() / loadMemories() — otherwise the
+// main process's `boot-config` IPC event arrives during the await window
+// and is lost (Electron doesn't queue events for listeners that don't
+// exist yet). We buffer the payload and let the IIFE consume it once the
+// sim is up. Spec: fix(boot): apply size/theme on first Fly, no race.
+let pendingBootConfig = null;
+if (api.onBootConfig) {
+  api.onBootConfig((cfg) => {
+    pendingBootConfig = cfg;
+    bootIfReady();
+  });
+}
+
+function bootIfReady() {
+  // We can only addFly() once the sim is constructed (the Fly constructor
+  // reads sim-bound data). If the sim isn't ready yet, the IIFE will call
+  // bootIfReady() again once LIFSim exists.
+  if (!sim) return;
+  if (!pendingBootConfig) return;
+  const cfg = pendingBootConfig;
+  pendingBootConfig = null;
+  if (cfg && typeof cfg.size === 'number') {
+    setScale(cfg.size);
+  }
+  if (cfg && typeof cfg.theme === 'string') {
+    setTheme(cfg.theme);
+    for (const fly of flies) fly.applyTheme();
+  }
+  addFly();
+  requestAnimationFrame(frame);
+}
+
 (async () => {
   const data = await api.getBrainData();
   if (data) {
@@ -608,6 +768,8 @@ api.onStimulate((req) => {
   } else {
     console.warn('no data/ — the fly falls back to legacy distance-based behavior');
   }
-  addFly();
-  requestAnimationFrame(frame);
+  // Sim is up (or legacy fall-through); drain any boot-config the main
+  // process sent during the await window. The listener is registered
+  // synchronously at module top so the event is never lost.
+  bootIfReady();
 })();
