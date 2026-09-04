@@ -1,0 +1,22 @@
+windows/renderer/overlay.js
+  s_430e98b37be290::t_0cdc667d191301 502
+  s_430e98b37be290::t_3b01bafe1cd2c2 494-499
+linux/test/snapshot.test.js
+  s_430e98b37be290::t_e12533274ba4c1 115-127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "15a6db0e35410789b4f7a6133e368988cd027e50",
+  "prompts": {},
+  "sessions": {
+    "s_430e98b37be290": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "18aa132c-62af-4457-9466-04d1348b6c17",
+        "model": "minimax/minimax-m3:free"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    }
+  }
+}
