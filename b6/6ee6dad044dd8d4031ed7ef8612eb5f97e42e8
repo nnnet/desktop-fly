@@ -1,0 +1,41 @@
+README.md
+  s_430e98b37be290::t_35345e43d0e7ed 27-34
+docs/ubuntu.md
+  s_430e98b37be290::t_cb3a160442803a 124-147
+linux/main.js
+  s_430e98b37be290::t_fa2c507e93727e 106-108,128-136,313-337,438-440
+plans/20260904-food-mate-seeking/plan.md
+  s_430e98b37be290::t_764f5c59620e2f 1-255
+windows/main.js
+  s_430e98b37be290::t_8df40fc3bdb257 214-222,386-416
+windows/preload.mjs
+  s_430e98b37be290::t_2a22317c765fc4 25-29
+windows/renderer/overlay.js
+  s_430e98b37be290::t_020f54f96a997b 11,86-93,110-112,226-329,394-408,433-440,443,446-449,496-504,506,509-514,551-559
+windows/src/attract.js
+  s_430e98b37be290::t_fe2f4fa7d0ce6f 1-91
+windows/src/flymodel.js
+  s_430e98b37be290::t_523bbe4fa6a81c 20,343,642-649
+windows/test/attracttest.js
+  s_430e98b37be290::t_b2784edfef0ce4 1-113
+windows/test/behaviortest.js
+  s_430e98b37be290::t_ca9ba6d3cdf8e5 10,280-321
+windows/test/simtest.js
+  s_430e98b37be290::t_682e4a7f505b1e 150,152-197,199
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "b66ee6dad044dd8d4031ed7ef8612eb5f97e42e8",
+  "prompts": {},
+  "sessions": {
+    "s_430e98b37be290": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "18aa132c-62af-4457-9466-04d1348b6c17",
+        "model": "minimax/minimax-m3:free"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    }
+  }
+}
