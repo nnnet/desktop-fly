@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "name": "sugar-forward-walk",
+  "description": "Stimulate walking command neurons (DNp09) and a sensory pulse. The fly should start walking forward; repeated sessions with Hebbian plasticity on should make the food zone → fwd edge grow.",
+  "rationale": "DNp09 (2 neurons) sets the walk/rest hysteresis. Paired with `sens` stimulation this is the canonical 'tarsal contact → forward walk' recipe from erojasoficial fly-brain. With plasticity on, repeated sugar reaches grow the sens→fwd synapse, the basis of food-mate memory persistence.",
+  "indices": [62, 284, 338, 339, 340],
+  "strength": 0.25,
+  "durationMs": 400
+}

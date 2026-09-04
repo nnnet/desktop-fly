@@ -34,6 +34,11 @@ contextBridge.exposeInMainWorld('flyAPI', {
   saveMemories: (data) => ipcRenderer.send('memories:save', data),
   clearMemories: () => ipcRenderer.send('memories:clear'),
 
+  // Phase B: brain-trainer lesson persistence (saves go to
+  // app.getPath('userData')/lessons/<name>.json, load is read-only).
+  saveLesson: (name, data) => ipcRenderer.invoke('lessons:save', { name, data }),
+  loadLesson: (name) => ipcRenderer.invoke('lessons:load', name),
+
   // debug: forward renderer console to main process log
   sendLog: (level, args) => ipcRenderer.send('renderer-log', { level, args }),
 });

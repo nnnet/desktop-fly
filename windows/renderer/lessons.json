@@ -1,0 +1,38 @@
+[
+  {
+    "version": 1,
+    "name": "loom-escape",
+    "description": "Stimulate looming detectors (LC4 + LPLC2). The fly should run away within ~100 ms (escape race).",
+    "rationale": "LC4 and LPLC2 are the canonical looming detectors. Their spike drives the escape pathway through the giant fiber (GF) which is electrically boosted by ×6 (see Sim.swift tuning gotchas). Abrupt stim, not a ramp — the ~1200-synapse feedforward inhibition is delayed 4 ms and loses to the electrical drive only on fast onset.",
+    "indices": [0, 1, 2, 5, 6, 7],
+    "strength": 0.4,
+    "durationMs": 80
+  },
+  {
+    "version": 1,
+    "name": "sugar-forward-walk",
+    "description": "Stimulate walking command neurons (DNp09) and a sensory pulse. The fly should start walking forward; repeated sessions with Hebbian plasticity on should make the food zone → fwd edge grow.",
+    "rationale": "DNp09 (2 neurons) sets the walk/rest hysteresis. Paired with `sens` stimulation this is the canonical 'tarsal contact → forward walk' recipe from erojasoficial fly-brain. With plasticity on, repeated sugar reaches grow the sens→fwd synapse, the basis of food-mate memory persistence.",
+    "indices": [62, 284, 338, 339, 340],
+    "strength": 0.25,
+    "durationMs": 400
+  },
+  {
+    "version": 1,
+    "name": "turn-left",
+    "description": "Stimulate right steering DNa01 — fly should turn left (contralateral). The sign of the turn comes from the existing slow-adapted L−R rate diff in flymodel.js.",
+    "rationale": "DNa01 has one L and one R neuron (indices 64=L, 327=R per role+side order in the circuit). Pushing the R-side alone biases the fly's heading toward the L. Use this to see the steering circuit live, or to test the slow-adaptation time constant (~250 ms) in the rate → turn bias mapping.",
+    "indices": [327],
+    "strength": 0.3,
+    "durationMs": 300
+  },
+  {
+    "version": 1,
+    "name": "groom-trigger",
+    "description": "Stimulate grooming command (DNg11) — fly should switch to groom state for ~600 ms.",
+    "rationale": "DNg11 is the canonical grooming command. The sim drives a walk→groom hysteresis with a 0.4 s dwell guard. Stimulating DNg11 crosses the grooming threshold and the fly should rub its legs; useful for verifying the behavioral switch path before debugging more complex sequences.",
+    "indices": [9, 92, 117],
+    "strength": 0.3,
+    "durationMs": 500
+  }
+]

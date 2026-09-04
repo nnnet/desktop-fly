@@ -114,11 +114,13 @@ export function planOverlays(allDisplays, activeDisplayId) {
  *   onClearZones: () => void,
  *   onSetTheme: (name: string) => void,
  *   onSetSize: (size: number) => void,
+ *   onToggleTrainer: () => void,
  *   onQuit: () => void,
  *   activeDisplayId: number,
  *   displayCount: number,
  *   paused: boolean,
  *   brainVisible: boolean,
+ *   trainerVisible: boolean,
  *   currentTheme: string,
  *   currentSize: number,
  * }} ctx
@@ -132,6 +134,12 @@ export function buildTrayMenu(ctx) {
     { type: 'separator' },
     { label: ctx.paused ? 'Resume' : 'Pause', click: ctx.onTogglePause },
     { label: ctx.brainVisible ? 'Hide Brain' : 'Show Brain', click: ctx.onToggleBrain },
+    {
+      label: 'Brain',
+      submenu: [
+        { label: ctx.trainerVisible ? 'Hide Trainer' : 'Open Trainer', click: ctx.onToggleTrainer },
+      ],
+    },
     {
       label: 'Send Fly to Next Display',
       visible: ctx.displayCount > 1,
@@ -289,6 +297,54 @@ export function createBrainWindow(primary, linuxDir) {
   return win;
 }
 
+// Phase B: brain-trainer window — optogenetic lesson player. Same shape as
+// the brain window (small, top-right, hideable) but with its own title and
+// page. Uses the same preload so api.getBrainData and api.stimulate just
+// work over the same IPC channels.
+let trainerWindow = null;
+let trainerVisible = false;
+export function createTrainerWindow(primary, linuxDir) {
+  const W = 540, H = 420;
+  const win = new BrowserWindow({
+    x: primary.workArea.x + primary.workArea.width - W - 18,
+    y: primary.workArea.y + primary.workArea.height - H - 18,
+    width: W,
+    height: H,
+    title: 'Brain Trainer — optogenetic lessons',
+    backgroundColor: '#0c0f15',
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    show: false,
+    webPreferences: {
+      preload: resolve(linuxDir, 'preload.mjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  win.setMenu(null);
+  win.on('close', (e) => {
+    if (!app.isQuitting) { e.preventDefault(); win.hide(); trainerVisible = false; refreshTray(); }
+  });
+  // brain-trainer.html lives in windows/renderer/ (the symlinked source of
+  // truth). Same path as the brain window uses.
+  win.loadFile(resolve(linuxDir, '..', 'windows', 'renderer', 'brain-trainer.html'));
+  win.once('ready-to-show', () => { if (trainerVisible) win.show(); });
+  return win;
+}
+function toggleTrainer() {
+  if (!trainerWindow || trainerWindow.isDestroyed()) {
+    trainerWindow = createTrainerWindow(screen.getPrimaryDisplay(), __dirname);
+    trainerVisible = true;
+    trainerWindow.once('ready-to-show', () => trainerWindow.show());
+  } else if (trainerWindow.isVisible()) {
+    trainerWindow.hide(); trainerVisible = false;
+  } else {
+    trainerWindow.show();   trainerVisible = true;
+  }
+  refreshTray();
+}
+
 // ----- IPC bridge: the renderer (windows/renderer/overlay.js, symlinked)
 // expects 8 channels. Without them, its async IIFE rejects on
 // `api.getBrainData()` and the scene stays empty (white PNG).
@@ -374,6 +430,10 @@ ipcMain.on('stimulate', (_e, req) => {
 // nuclear option. (fs/path imports are at the top of the file with
 // the rest — ESM forbids redeclaration.)
 const memoriesFile = () => join(app.getPath('userData'), 'food-memories.json');
+// Phase B: per-lesson JSON files under userData/lessons/<name>.json.
+// Same pattern as memoriesFile but per-lesson instead of one big blob.
+const lessonsDir  = () => join(app.getPath('userData'), 'lessons');
+const lessonFile  = (name) => join(lessonsDir(), `${name}.json`);
 
 ipcMain.handle('memories:load', async () => {
   try { return JSON.parse(await fsp.readFile(memoriesFile(), 'utf8')); }
@@ -391,6 +451,27 @@ ipcMain.on('memories:save', async (_e, payload) => {
 ipcMain.on('memories:clear', () => {
   try { if (existsSync(memoriesFile())) unlinkSync(memoriesFile()); }
   catch (err) { console.warn('memories:clear failed:', err); }
+});
+
+// Phase B: brain-trainer lesson save/load. Returns the saved file path
+// string on success, null on failure (the renderer surfaces it in the log).
+ipcMain.handle('lessons:save', async (_e, { name, data }) => {
+  if (typeof name !== 'string' || !name) return null;
+  if (typeof data !== 'string') return null;
+  // basic safety: only [a-z0-9._-], prevent path traversal
+  if (!/^[a-z0-9._-]+$/i.test(name)) return null;
+  try {
+    await fsp.mkdir(lessonsDir(), { recursive: true });
+    await fsp.writeFile(lessonFile(name), data, 'utf8');
+    return lessonFile(name);
+  } catch (err) { console.warn('lessons:save failed:', err); return null; }
+});
+
+ipcMain.handle('lessons:load', async (_e, name) => {
+  if (typeof name !== 'string' || !name) return null;
+  if (!/^[a-z0-9._-]+$/i.test(name)) return null;
+  try { return await fsp.readFile(lessonFile(name), 'utf8'); }
+  catch { return null; }
 });
 
 // Forward every renderer console.{log,info,warn,error} to main stderr.
@@ -527,11 +608,13 @@ function refreshTray() {
       broadcastCmd({ name: 'setSize', size });
       refreshTray();
     },
+    onToggleTrainer: toggleTrainer,
     onQuit: () => { app.isQuitting = true; app.quit(); },
     activeDisplayId,
     displayCount: allDisplays.length,
     paused,
     brainVisible,
+    trainerVisible,
     currentTheme,
     currentSize,
   }));

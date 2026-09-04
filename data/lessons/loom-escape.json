@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "name": "loom-escape",
+  "description": "Stimulate looming detectors (LC4 + LPLC2). The fly should run away within ~100 ms (escape race).",
+  "rationale": "LC4 and LPLC2 are the canonical looming detectors. Their spike drives the escape pathway through the giant fiber (GF) which is electrically boosted by ×6 (see Sim.swift tuning gotchas). Abrupt stim, not a ramp — the ~1200-synapse feedforward inhibition is delayed 4 ms and loses to the electrical drive only on fast onset.",
+  "indices": [0, 1, 2, 5, 6, 7],
+  "strength": 0.4,
+  "durationMs": 80
+}

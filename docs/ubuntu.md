@@ -122,6 +122,55 @@ Plasma 6), and wlroots compositors report logical outputs through the
 | Fly flickers / GPU error | `nvidia-smi` to check the driver; on Optimus laptops, force NVIDIA via `prime-run npm start` |
 | Tests fail with `EACCES: /dev/dri` | run under `xvfb-run -a npm test` (no real GPU needed) |
 
+## Customizing the fly
+
+The fly's appearance is configurable at startup and at runtime, both from
+the CLI and from the tray.
+
+### CLI
+
+```sh
+npm start -- --fly-theme cyan --fly-size 1.5   # cyan fly at 1.5x scale
+FLY_THEME=magenta FLY_SIZE=2.0 npm start       # env vars work too
+```
+
+`--fly-size` is clamped to `[0.3, 5.0]` — values outside the range are
+snapped to the nearest bound (the original `FLY_SCALE=14.0` invisibility
+bug is the reason for the cap). Theme names: `orange` (default), `fruitfly`,
+`cyan`, `magenta`, `yellow`, `green`.
+
+### Tray
+
+The tray menu has two appearance submenus:
+
+- **Theme** — pick any of the six themes; the swap is instant, no restart.
+  The current theme has a ✓ marker.
+- **Size** — 0.5x, 1x, 1.5x, 2x, 3x. The current size has a ✓ marker.
+
+The scale is applied to the body's `root.scale`, so the same `FLY_SCALE`
+cap applies; the menu labels also reflect the bounds.
+
+## Brain Trainer
+
+Tray → **Brain** → **Open Trainer** opens a small 540×420 window with a
+list of pre-built optogenetic lessons:
+
+- **loom-escape** — stimulate LC4 + LPLC2; the fly should escape within ~100 ms.
+- **sugar-forward-walk** — DNp09 + sensory pulse; the fly walks forward.
+- **turn-left** — right steering DNa01; the fly turns left.
+- **groom-trigger** — DNg11; the fly switches to groom.
+
+Click **Apply** to inject current into the listed neurons for the
+specified duration. The brain window flashes the targeted neurons. Click
+**Save** to copy the pattern into
+`~/.config/desktop-fly/lessons/<name>.json` for editing; **Load** reads it
+back.
+
+The lessons live in `data/lessons/*.json` (the source of truth, edited by
+hand) and are bundled as `windows/renderer/lessons.json` (the runtime
+sidecar). The `brain-trainer.test.js` suite validates every lesson:
+indices must be in-bounds, strength ∈ [0, 1], durationMs ∈ [50, 2000].
+
 ## Game mode (food & mate)
 
 The tray has a **Game** submenu with three entries:
