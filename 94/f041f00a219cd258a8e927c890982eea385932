@@ -1,0 +1,19 @@
+windows/renderer/overlay.js
+  s_c80a415793d991::t_b1986ec7abdd9e 447-460
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "94f041f00a219cd258a8e927c890982eea385932",
+  "prompts": {},
+  "sessions": {
+    "s_c80a415793d991": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2d902537-236e-4079-aeca-c6e315116f31",
+        "model": "OpenRouter/minimax/minimax-m3:free"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    }
+  }
+}
