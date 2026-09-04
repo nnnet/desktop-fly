@@ -112,7 +112,9 @@ function createOverlay(b) {
 }
 
 function createBrain(d) {
-  const W = 340, H = 300;
+  // Brain window grew to fit the state line + memory panel
+  // (top-10 Hebbian weight bars) under the 3D point cloud.
+  const W = 480, H = 500;
   const win = new BrowserWindow({
     x: d.workArea.x + d.workArea.width - W - 18,
     y: d.workArea.y + d.workArea.height - H - 18,

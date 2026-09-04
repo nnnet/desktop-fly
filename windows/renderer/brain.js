@@ -102,7 +102,7 @@ async function refreshMemoryPanel() {
     row.className = 'bar';
     const lab = document.createElement('div');
     lab.className = 'label';
-    lab.textContent = `edge #${i}`;
+    lab.textContent = edgeLabel(i);
     const tr = document.createElement('div');
     tr.className = 'track';
     const fill = document.createElement('div');
@@ -201,7 +201,38 @@ function makeFlashMaterial(rgb) {
   });
 }
 
+// Circuit is loaded once and stored at module scope so the
+// memory panel can resolve edge #i to "<pre>→<post>" labels.
+// circuit.neurons[i].role is one of: lc4, lplc2, dna01, dna02,
+// dnp09, dng11, mdn, escw, gf, ascend, sens. circuit.edges[i]
+// is [preIdx, postIdx] and lines up with sim.w[i] (and with
+// food-memories.json's weights array).
+let circuitCache = null;
+function roleLabel(idx) {
+  if (!circuitCache) return `n${idx}`;
+  const nr = circuitCache.neurons[idx];
+  if (!nr) return `n${idx}`;
+  const r = nr.role || 'n';
+  // Shorten the long ones for the compact bar label.
+  if (r === 'lc4') return 'LC4';
+  if (r === 'lplc2') return 'LPLC2';
+  if (r === 'dna01') return 'DNa01';
+  if (r === 'dna02') return 'DNa02';
+  if (r === 'dnp09') return 'DNp09';
+  if (r === 'dng11') return 'DNg11';
+  if (r === 'mdn')   return 'MDN';
+  if (r === 'escw')  return 'escW';
+  if (r === 'gf')    return 'GF';
+  return r.toUpperCase();
+}
+function edgeLabel(i) {
+  if (!circuitCache || !circuitCache.edges || !circuitCache.edges[i]) return `edge #${i}`;
+  const [pre, post] = circuitCache.edges[i];
+  return `${roleLabel(pre)}→${roleLabel(post)}`;
+}
+
 function build(points, circuit) {
+  circuitCache = circuit;
   // full brain: 23k real somas
   const pts = points.points;
   const pos = new Float32Array(pts.length * 3);
