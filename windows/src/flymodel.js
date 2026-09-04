@@ -20,7 +20,7 @@ import { makeSignals } from './sim.js';
 import { foodAndMateAttract } from './attract.js';
 
 export const SHADOWS_ENABLED = true;
-export const FLY_SCALE = 5.0;    // large enough to see at 1920x1080
+export const FLY_SCALE = 14.0;   // large enough to see at any desktop / HiDPI; was 5.0
 export const EDGE_MARGIN = 50;
 
 // MARK: - Theme
