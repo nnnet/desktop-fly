@@ -42,8 +42,17 @@ export const TAG_FOR_NEURON = Object.freeze({
 
 export const DEFAULT_CONFIG = Object.freeze({
   // The seven behavioural states that appear in the `state.tag`
-  // field. Order matters: the renderer shows rows in this order.
-  behaviours: ['walk', 'fly', 'idle', 'groom', 'sleep', 'eat', 'court'],
+  // field emitted by windows/renderer/overlay.js. Order matters:
+  // the renderer shows rows in this order. We use 'flight' (not
+  // 'fly') to match exactly what the overlay publishes — see the
+  // tag-mapping block in overlay.js around line 615 where the
+  // overlay sends `sn === 'flying' ? 'flight' : ...`. A mismatch
+  // here would make the 'flight' row silently never receive any
+  // events (no error, just 0s in the stat). The recent
+  // regression caught exactly that: the brain-stats window
+  // showed 0.0s for the 'fly' row even though the fly was clearly
+  // flying in the brain window.
+  behaviours: ['walk', 'flight', 'idle', 'groom', 'sleep', 'eat', 'court'],
   metric: 'sum_duration',
   window_seconds: 60,
 });

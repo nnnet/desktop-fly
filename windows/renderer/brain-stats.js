@@ -21,15 +21,16 @@ const statusEl = document.getElementById('status');
 const DEFAULT_BEHAVIOURS = ['walk', 'fly', 'idle', 'groom', 'sleep', 'eat', 'court'];
 // For each behaviour, list the neurons that "drive" it — purely
 // cosmetic: shown as a subtitle so the user can see which command
-// populations actually contribute to the bar.
+// populations actually contribute to the bar. The keys MUST
+// match `state.tag` exactly (see overlay.js around line 615).
 const NEURONS_FOR = {
-  walk:   'DNa01, DNa02, DNp09, MDN',
-  fly:    'GF, escW',
-  idle:   '—',
-  groom:  'DNg11',
-  sleep:  '—',
-  eat:    '—',
-  court:  '—',
+  walk:    'DNa01, DNa02, DNp09, MDN',
+  flight:  'GF, escW, LC4, LPLC2',
+  idle:    '—',
+  groom:   'DNg11',
+  sleep:   '—',
+  eat:     '—',
+  court:   '—',
 };
 
 let config = null;        // {behaviours, metric, window_seconds}

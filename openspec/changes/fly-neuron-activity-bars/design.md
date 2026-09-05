@@ -72,7 +72,7 @@ File: `~/.config/desktop-fly/brain-stats.json` (Windows: `%APPDATA%/desktop-fly/
 
 ```json
 {
-  "behaviours": ["walk", "fly", "idle", "groom", "sleep", "eat", "court"],
+  "behaviours": ["walk", "flight", "idle", "groom", "sleep", "eat", "court"],
   "metric": "sum_duration",
   "window_seconds": 60
 }

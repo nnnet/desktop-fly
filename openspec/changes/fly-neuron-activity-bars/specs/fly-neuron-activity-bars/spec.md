@@ -3,7 +3,7 @@
 ## Purpose
 
 Adds a fourth live window that consumes the existing `state` IPC
-stream and renders, for each behavioural state (`walk`, `fly`,
+stream and renders, for each behavioural state (`walk`, `flight`,
 `idle`, `groom`, `sleep`, `eat`, `court`), two horizontal bars:
 the share of the session's time spent in that state and the share
 of the most recent rolling window's time spent in that state. The
@@ -32,9 +32,14 @@ opened by a tray item `Brain → Show Stats`.
 ### Requirement: One row per behaviour, with two global-share bars
 
 For each of the seven behavioural states that appear in the
-`state` IPC payload (`walk`, `fly`, `idle`, `groom`, `sleep`,
+`state` IPC payload (`walk`, `flight`, `idle`, `groom`, `sleep`,
 `eat`, `court`), the system SHALL render exactly one row in the
-window. The row SHALL show:
+window. The behaviour names listed here MUST match the exact
+`state.tag` strings emitted by windows/renderer/overlay.js
+(around line 615); a mismatch — e.g. listing `fly` when the
+overlay publishes `flight` — would make the matching row silently
+show 0s even while the fly is actively flying. The row SHALL
+show:
 
 - the behaviour name (e.g. `walk`) as the row label,
 - a `lifetime share` bar — the fraction of total session time spent

@@ -91,11 +91,42 @@ test('unknown neuron returns zeros (does not crash)', () => {
   assert.equal(a.recent, 0);
 });
 
-test('default config has 7 behavioural states', () => {
+test('default config has 7 behavioural states matching overlay.js tags', () => {
+  // The keys must match the `state.tag` strings that overlay.js
+  // publishes. In particular, the overlay emits 'flight' (not
+  // 'fly') for the flying state — see overlay.js around line 615.
+  // A previous version of this default used 'fly' and the
+  // brain-stats window silently showed 0.0s for that row even when
+  // the fly was clearly flying in the brain window.
   assert.equal(DEFAULT_CONFIG.behaviours.length, 7);
-  for (const k of ['walk', 'fly', 'idle', 'groom', 'sleep', 'eat', 'court']) {
+  for (const k of ['walk', 'flight', 'idle', 'groom', 'sleep', 'eat', 'court']) {
     assert.ok(DEFAULT_CONFIG.behaviours.includes(k), `default missing ${k}`);
   }
+});
+
+test('regression: a "flight" event is NOT silently dropped (matches overlay.js tag)', () => {
+  // The user reported that the brain-stats window showed 0.0s for
+  // "fly" while the fly was visibly flying in the brain window. The
+  // root cause: DEFAULT_CONFIG used 'fly' but overlay.js publishes
+  // 'flight'. The aggregator had no entry for 'fly' so the row
+  // rendered 0s. This test pins the contract: events emitted by
+  // the overlay must reach the matching row.
+  const bs = new BrainStats(DEFAULT_CONFIG);
+  bs.push('walk', 0);
+  bs.push('flight', 30000);    // exactly what overlay.js sends
+  bs.push('walk', 50000);
+  const t = bs.totalsByTag(50000);
+  // The 'flight' row should pick up the 20-second flight interval
+  // (the time from t=30 to t=50, attributed to the later 'walk'
+  // state under the later-tag semantic — wait, no: the interval
+  // (30, 50] is attributed to the LATER event's tag, which is
+  // 'walk'. So walk gets the (30,50] = 20s, and the open-ended
+  // tail at 50s is attributed to the last 'walk' event.)
+  // The flight interval is (0, 30] attributed to 'flight': 30s.
+  assert.equal(t.lifetime.flight, 30,
+    'a flight event must reach the flight row (was the regression)');
+  assert.ok(t.lifetime.flight > 0,
+    'flight row must be non-empty when the fly was flying');
 });
 
 test('TAG_FOR_NEURON maps every default neuron to a non-empty tag', () => {
@@ -161,12 +192,12 @@ test('loadConfig: valid full config is returned as-is', () => {
   try {
     const path = join(dir, 'full.json');
     writeFileSync(path, JSON.stringify({
-      behaviours: ['walk', 'fly'],
+      behaviours: ['walk', 'flight'],
       metric: 'count',
       window_seconds: 120,
     }));
     const cfg = loadConfig(path);
-    assert.deepEqual(cfg.behaviours, ['walk', 'fly']);
+    assert.deepEqual(cfg.behaviours, ['walk', 'flight']);
     assert.equal(cfg.metric, 'count');
     assert.equal(cfg.window_seconds, 120);
   } finally { rmSync(dir, { recursive: true, force: true }); }
