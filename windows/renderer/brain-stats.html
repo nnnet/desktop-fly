@@ -37,8 +37,10 @@
          align-items: center;
          margin-bottom: 5px;
          font: 11px Consolas, monospace; }
-  .row .name { color: #fff; font-weight: 600; }
-  .row .name .sub { color: #6da8d6; font-size: 9px; font-weight: 400; display: block; }
+  .row .name { color: #fff; font-weight: 600; overflow: hidden;
+                 text-overflow: ellipsis; white-space: nowrap; }
+  .row .name .sub { color: #6da8d6; font-size: 9px; font-weight: 400;
+                     display: none; }
   .row .track { position: relative; height: 12px;
                 background: #0c0f15; border-radius: 2px;
                 overflow: hidden; }
