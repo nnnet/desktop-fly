@@ -39,11 +39,25 @@
   #state-line .rates { color: #8a96a8; font-size: 10px;
                        white-space: nowrap; overflow: hidden;
                        text-overflow: ellipsis; flex: 1 1 auto; }
+  /* Per-influence proximity + escape teaching signal. Same line,
+     right-aligned, coloured so it doesn't compete with the rates
+     block. Hidden when no influence is currently active so the
+     rates block can take the full row. */
+  #state-line .prox { color: #ff8080; font-size: 10px;
+                      white-space: nowrap; overflow: hidden;
+                      text-overflow: ellipsis; flex: 0 0 auto;
+                      margin-left: 8px; }
+  #state-line .prox .esc { color: #c8a0ff; }
+  #state-line .prox .none { display: none; }
+                     flex: 0 0 50px; }
+  #state-line .rates { color: #8a96a8; font-size: 10px;
+                       white-space: nowrap; overflow: hidden;
+                       text-overflow: ellipsis; flex: 1 1 auto; }
 
 </style>
 </head>
 <body>
-<div id="state-line"><span class="tag">—</span><span class="rates"></span></div>
+<div id="state-line"><span class="tag">—</span><span class="rates"></span><span class="prox"></span></div>
 <div id="memory-panel"></div>
 <div id="label"></div>
 <script type="module" src="./brain.js"></script>

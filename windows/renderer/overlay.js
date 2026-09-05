@@ -430,12 +430,25 @@ function checkReaches(fly) {
   // to the sim so plasticity can apply sens->gf LTD.
   // Spec: fly-predator-zones "Predator proximity boosts flight speed" +
   // "Predator exposure teaches escape".
+  // Per-kind nearest-zone distance. Used by the brain window's state
+  // line to show "pred Npt · sgr Npt · mate Npt" so the user can
+  // attribute which influence is currently acting on the fly. We
+  // report `null` when no zone of that kind exists.
+  let nearestPredatorD = null;
+  let nearestSugarD    = null;
+  let nearestMateD     = null;
   let nearestD = Infinity;
   let nearestPredator = null;
   for (const z of zones) {
-    if (z.kind !== 'predator') continue;
     const d = Math.hypot(z.x - fly.pos.x, z.y - fly.pos.y);
-    if (d < nearestD) { nearestD = d; nearestPredator = z; }
+    if (z.kind === 'predator') {
+      if (nearestPredatorD === null || d < nearestPredatorD) nearestPredatorD = d;
+      if (d < nearestD) { nearestD = d; nearestPredator = z; }
+    } else if (z.kind === 'sugar') {
+      if (nearestSugarD === null || d < nearestSugarD) nearestSugarD = d;
+    } else if (z.kind === 'mate') {
+      if (nearestMateD === null || d < nearestMateD) nearestMateD = d;
+    }
   }
   if (nearestPredator && nearestD < PREDATOR_RANGE_PT) {
     const flyIdx = flies.indexOf(fly);
@@ -632,6 +645,22 @@ function frame(tMs) {
             MDN:   sim ? sim.rateMDN   : 0,
             escW:  sim ? sim.rateEscW  : 0,
           },
+          // Per-kind nearest-zone distance (px in the fly's frame).
+          // `null` means "no zone of that kind exists". Lets the brain
+          // window attribute the current behaviour to a specific
+          // influence (predator / sugar / mate) instead of guessing
+          // from rates alone. Additive — no existing consumer breaks.
+          proximity: {
+            predator: nearestPredatorD,
+            sugar:    nearestSugarD,
+            mate:     nearestMateD,
+          },
+          // Hebbian teaching signal: rises when a predator zone is
+          // close, drives LTD on sens→gf edges. Persists for a while
+          // after the predator leaves (decay is in the sim). Useful
+          // for distinguishing "the predator was here" from "the
+          // fly is just flying" when rateGF is high.
+          escapeTeach: sim ? sim.escapeTeach : 0,
         });
       }
     }

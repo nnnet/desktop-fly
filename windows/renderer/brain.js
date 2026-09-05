@@ -14,6 +14,13 @@ const api = window.flyAPI;
 const labelEl = document.getElementById('label');
 const stateTagEl = document.querySelector('#state-line .tag');
 const stateRatesEl = document.querySelector('#state-line .rates');
+const stateProxEl = document.querySelector('#state-line .prox');
+
+// Show the proximity suffix when any influence is within 300pt. That
+// matches the threshold overlay.js uses to fire `sim.stimulate(sim.gf,
+// ...)` for the predator GF-stimulation path, so the suffix and the
+// stim stay in lock-step.
+const PROX_DISPLAY_PT = 300;
 
 // Typical-max Hz for each of the nine populations the brain state line
 // shows. The renderer divides the live rate by this number to normalise
@@ -42,6 +49,33 @@ function fmt3(v) {
   return x.toFixed(3);
 }
 
+function renderProxSuffix(payload) {
+  // Build "pred 47pt · sgr 220pt · mate —" or empty when no influence
+  // is currently close. We use the dot-separator style and an em-dash
+  // for "no zone of this kind exists" so the user can tell the two
+  // apart from a real distance value.
+  const p = payload.proximity || {};
+  const esc = Number(payload.escapeTeach) || 0;
+  const parts = [];
+  const fmt = (label, v) => {
+    if (v === null || v === undefined) return `${label} —`;
+    if (typeof v !== 'number' || !isFinite(v)) return `${label} ?`;
+    return `${label} ${Math.round(v)}pt`;
+  };
+  const predClose = p.predator !== null && p.predator !== undefined && p.predator < PROX_DISPLAY_PT;
+  const sugarClose = p.sugar !== null && p.sugar !== undefined && p.sugar < PROX_DISPLAY_PT;
+  const mateClose  = p.mate  !== null && p.mate  !== undefined && p.mate  < PROX_DISPLAY_PT;
+  if (predClose)  parts.push(fmt('pred', p.predator));
+  if (sugarClose) parts.push(fmt('sgr',  p.sugar));
+  if (mateClose)  parts.push(fmt('mate', p.mate));
+  if (esc > 0.001) parts.push(`<span class="esc">esc ${esc.toFixed(2)}</span>`);
+  if (parts.length === 0) {
+    stateProxEl.innerHTML = '';
+    return;
+  }
+  stateProxEl.innerHTML = parts.join(' · ');
+}
+
 function renderState(payload) {
   if (!payload) return;
   stateTagEl.textContent = payload.tag || '—';
@@ -51,6 +85,7 @@ function renderState(payload) {
       return `${k}=${fmt3(hz / RATE_TYP_MAX[k])}`;
     }).join('  ');
   }
+  renderProxSuffix(payload);
 }
 
 // onState: throttled brain state readout from the overlay renderer. We
