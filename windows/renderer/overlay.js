@@ -493,6 +493,28 @@ function checkReaches(fly) {
   return out;
 }
 
+// Per-kind nearest-zone distance from the fly. Used by the brain
+// window's state line to show "pred Npt Â· sgr Npt Â· mate Npt" so the
+// user can attribute the current behaviour to a specific influence.
+// Returns  for a kind with no zones (so the brain window can
+// show an em-dash instead of a meaningless distance).
+// Module-level so the  IPC send can call it without
+// duplicating the loop in .
+function computeProximity(fly) {
+  const out = { predator: null, sugar: null, mate: null };
+  for (const z of zones) {
+    const d = Math.hypot(z.x - fly.pos.x, z.y - fly.pos.y);
+    if (z.kind === 'predator') {
+      if (out.predator === null || d < out.predator) out.predator = d;
+    } else if (z.kind === 'sugar') {
+      if (out.sugar === null || d < out.sugar) out.sugar = d;
+    } else if (z.kind === 'mate') {
+      if (out.mate === null || d < out.mate) out.mate = d;
+    }
+  }
+  return out;
+}
+
 // Cursor kinematics -> looming drive for each eye of fly #1 + air puff.
 // This is the sensory transduction step; everything downstream of the
 // LC4/LPLC2 population is the real connectome.
@@ -650,11 +672,14 @@ function frame(tMs) {
           // window attribute the current behaviour to a specific
           // influence (predator / sugar / mate) instead of guessing
           // from rates alone. Additive — no existing consumer breaks.
-          proximity: {
-            predator: nearestPredatorD,
-            sugar:    nearestSugarD,
-            mate:     nearestMateD,
-          },
+          // (The `let nearestPredatorD` block used to live inside
+          // `checkReaches()` and was mis-referenced from here, which
+          // threw `ReferenceError: nearestPredatorD is not defined`.
+          // We now call the module-level helper `computeProximity`.)
+          proximity: (() => {
+            const p = computeProximity(first);
+            return { predator: p.predator, sugar: p.sugar, mate: p.mate };
+          })(),
           // Hebbian teaching signal: rises when a predator zone is
           // close, drives LTD on sens→gf edges. Persists for a while
           // after the predator leaves (decay is in the sim). Useful
