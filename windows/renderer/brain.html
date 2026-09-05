@@ -27,15 +27,20 @@
      rates. Spec: brain-state-readout. The bar charts live in the
      trainer window's Memory tab. */
   #state-line {
-    position: fixed; left: 0; right: 0; top: 0; height: 18px;
-    display: flex; align-items: center; gap: 8px; padding: 0 8px;
+    position: fixed; left: 0; right: 0; top: 0;
+    /* Auto-height: the row is normally 18px, but grows when the
+       rates block is wide (it can't wrap because the population
+       keys must stay paired with their values). */
+    min-height: 18px;
+    display: flex; align-items: center; flex-wrap: wrap;
+    gap: 4px 8px; padding: 2px 8px;
     background: rgba(0, 0, 0, 0.65); color: #d8d8d8;
-    font: 11px "Consolas", monospace; white-space: nowrap;
+    font: 11px "Consolas", monospace;
     border-bottom: 1px solid #1f2530; z-index: 10;
     overflow: hidden;
   }
   #state-line .tag { font-weight: 700; color: #ffd23f;
-                     flex: 0 0 50px; }
+                     flex: 0 0 auto; }
   #state-line .rates { color: #8a96a8; font-size: 10px;
                        white-space: nowrap; overflow: hidden;
                        text-overflow: ellipsis; flex: 1 1 auto; }
@@ -49,10 +54,6 @@
                       margin-left: 8px; }
   #state-line .prox .esc { color: #c8a0ff; }
   #state-line .prox .none { display: none; }
-                     flex: 0 0 50px; }
-  #state-line .rates { color: #8a96a8; font-size: 10px;
-                       white-space: nowrap; overflow: hidden;
-                       text-overflow: ellipsis; flex: 1 1 auto; }
 
 </style>
 </head>
