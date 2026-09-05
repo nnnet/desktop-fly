@@ -1,0 +1,30 @@
+openspec/changes/fly-neuron-activity-bars/specs/fly-neuron-activity-bars/spec.md
+  s_c80a415793d991::t_2e82ca0d17f00b 35,37-42
+  s_c80a415793d991::t_d3f86ca0c9849c 6
+windows/src/brain-stats.js
+  s_c80a415793d991::t_76791fff3a8dc3 45-55
+openspec/changes/fly-neuron-activity-bars/design.md
+  s_c80a415793d991::t_13c7edf9ef20c6 75
+windows/test/brainstats.test.js
+  s_c80a415793d991::t_bf26da5d84d963 195,200
+  s_c80a415793d991::t_ab867ff23e6460 107-131
+  s_c80a415793d991::t_e8e1655fc7c33f 94-100,102
+windows/renderer/brain-stats.js
+  s_c80a415793d991::t_a3e52aa5736e09 24-25,27-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "ac7edd400250622949c275cfec0856bdb469109d",
+  "prompts": {},
+  "sessions": {
+    "s_c80a415793d991": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2d902537-236e-4079-aeca-c6e315116f31",
+        "model": "OpenRouter/minimax/minimax-m3:free"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    }
+  }
+}
