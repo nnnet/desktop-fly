@@ -7,11 +7,12 @@
 <style>
   html, body { margin: 0; padding: 0; overflow: hidden; background: #080a10;
                font: 11px "Segoe UI", system-ui, sans-serif; }
-  /* The 3D point cloud is rendered into a fixed-size <canvas> in
-     the upper part of the window. The brain window is 340x540
-     (see main.js); the canvas is 300x300 (the brain is
-     unchanged from the original 340x300 design), and the lower
-     240 px holds the state line + memory panel. */
+  /* The 3D point cloud is rendered into a <canvas> that brain.js
+     creates and appends to the body (it sizes the canvas to the
+     window and lets CSS set the block-display). The brain window
+     is 340x300 (see main.js); the state-line floats over the
+     top 18 px. There is no other content in the body, so the
+     canvas is laid out at (0, 0) of the window. */
   canvas { display: block; }
   #label {
     position: fixed; left: 50%; top: 0; width: 340px;
@@ -42,7 +43,6 @@
 </style>
 </head>
 <body>
-<canvas id="brain-canvas"></canvas>
 <div id="state-line"><span class="tag">—</span><span class="rates"></span></div>
 <div id="memory-panel"></div>
 <div id="label"></div>
