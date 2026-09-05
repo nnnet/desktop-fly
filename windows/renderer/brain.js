@@ -229,28 +229,36 @@ function build(points, circuit) {
   // Centre the brain in the camera view. The neuron positions come
   // from the FlyWire data file (data/brain_points.json) and the
   // circuit JSON; they are NOT necessarily centred around the
-  // origin. Compute the bounding box, shift the group so the box
-  // is centred at the origin, and point the camera at it. The
-  // result is the same brain visualisation but always centred
-  // regardless of how the source data was offset.
+  // origin (the actual data is roughly centred, but we do not
+  // trust the data; we re-centre at runtime). Compute the bounding
+  // box of the point clouds only, shift the group by -centre so
+  // the brain sits at the origin, and point the camera at it.
+  //
+  // Why only point clouds? The stimRing (sphere radius 2.2) and the
+  // 48 flash pool spheres (radius 0.16) all sit at (0,0,0); they
+  // are not part of the brain. Including them inflates the bbox
+  // away from the brain silhouette and the resulting centre is
+  // pulled off-axis (the stimRing alone pulls the Y centre up by
+  // ~1 unit, which then drives the brain to the lower half of
+  // the frame).
   const box = new THREE.Box3();
   group.children.forEach((c) => {
-    if (!c.geometry || !c.geometry.boundingBox) c.geometry.computeBoundingBox();
-    if (c.geometry && c.geometry.boundingBox) box.union(c.geometry.boundingBox);
+    // THREE.Points is the brain points; skip Mesh children (the
+    // GF sphere, stimRing, flash pool). The brain points are the
+    // only ones whose bounding box is the brain silhouette.
+    if (!(c instanceof THREE.Points)) return;
+    if (!c.geometry.boundingBox) c.geometry.computeBoundingBox();
+    if (c.geometry.boundingBox) box.union(c.geometry.boundingBox);
   });
-  // Sphere-based markers (GF, stimRing) do not contribute to
-  // geometry.boundingBox. The position cloud dominates.
   const centre = new THREE.Vector3();
   box.getCenter(centre);
   group.position.sub(centre);
-  // After shifting the group by -centre, the brain sits at the
-  // origin. The camera was at (0, 0.6, 29); keep that target by
-  // pointing it at the origin (it already does, by default).
+  // The brain is now centred around the origin in world space.
+  // The camera looks at (0, 0, 0) and is far enough back that
+  // the entire brain silhouette fits the frustum. The Y
+  // component of the camera position keeps the same slight
+  // top-down angle as before (0.6) so the brain is not dead-on.
   camera.lookAt(0, 0, 0);
-  // Move the camera so the brain fits the viewport. The bounding
-  // sphere radius is half the box diagonal; the perspective
-  // camera's fov=46 deg gives a frustum half-angle of 23 deg, so
-  // the distance needed is radius / tan(23 deg) ~= radius * 2.4.
   const size = new THREE.Vector3();
   box.getSize(size);
   const r = size.length() * 0.5;
