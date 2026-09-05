@@ -625,7 +625,16 @@ function frame(tMs) {
       // does not chase sugar.
       if (first.sugarLevel < 0.2) attract.foodAttract = 0;
       const mult = (first.state === 'flying') ? 0.5 : 1.0;
-      first.heading += (attract.foodAttract + attract.mateAttract + attract.predatorAttract) * mult * dt;
+      // Heading bias 3x: the per-frame wander in updateWalk
+      // (±WANDER_JITTER * sqrt(dt) ≈ ±0.027 rad) would otherwise
+      // cancel the food/mate/predator attract on most frames
+      // (the strongest attract at the edge of the food radius is
+      // falloff=0.56 ≈ 0.009 rad/frame with mult=1.0; the previous
+      // 1.0x bias was washed out by wander). 3x matches the boost
+      // that was previously in flymodel.js#updateWalk and was
+      // deliberately removed when the bias moved to the renderer
+      // (see commit history in updateWalk).
+      first.heading += (attract.foodAttract + attract.mateAttract + attract.predatorAttract) * mult * dt * 3.0;
     }
 
     if (spikeBus) {
