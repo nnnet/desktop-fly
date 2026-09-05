@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { loadBrainData } from './src/data.js';
 import { circadianActivity, ThermalTempo } from './src/environment.js';
 import { listWindows, pollMouseButtons, win32Available } from './src/win32.js';
+import { loadConfig as loadBrainStatsConfig } from './src/brain-stats-config.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEBUG = !!process.env.DESKTOPFLY_DEBUG;
@@ -409,6 +410,10 @@ ipcMain.on('stimulate', (_e, req) => send(overlay, 'stimulate', req));
 import { promises as fsp, existsSync, unlinkSync } from 'fs';
 import { join } from 'path';
 const memoriesFile = () => join(app.getPath('userData'), 'food-memories.json');
+// fly-neuron-activity-bars: the Brain Stats window's config. Read
+// on demand by the renderer; the same brain-stats.js#loadConfig
+// handles missing/malformed JSON with the default object.
+const brainStatsFile = () => join(app.getPath('userData'), 'brain-stats.json');
 
 ipcMain.handle('memories:load', async () => {
   try {
@@ -432,6 +437,12 @@ ipcMain.on('memories:clear', () => {
   try { if (existsSync(memoriesFile())) unlinkSync(memoriesFile()); }
   catch (err) { console.warn('memories:clear failed:', err); }
 });
+
+// fly-neuron-activity-bars: the Brain Stats window reads its
+// config via this channel. The renderer is fully read-only here;
+// the user edits the JSON file by hand. The loadConfig helper
+// already returns the default config on missing/malformed files.
+ipcMain.handle('brain-stats:read', () => loadBrainStatsConfig(brainStatsFile()));
 
 app.on('window-all-closed', () => { /* tray-only app: stay alive */ });
 app.on('before-quit', () => {

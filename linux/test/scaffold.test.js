@@ -13,8 +13,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const linux = resolve(here, '..');                 // /tmp/desktop-fly/linux
 const windows = resolve(linux, '..', 'windows');   // /tmp/desktop-fly/windows
 
-const sharedSrc = ['sim.js', 'flymodel.js', 'signals.js', 'data.js', 'util.js', 'environment.js'];
-const sharedTest = ['simtest.js', 'behaviortest.js'];
+const sharedSrc = ['sim.js', 'flymodel.js', 'signals.js', 'data.js', 'util.js', 'environment.js', 'brain-stats.js', 'brain-stats-config.js'];
+const sharedTest = ['simtest.js', 'behaviortest.js', 'brainstats.test.js'];
 // Live + snapshot renderers preload from the windows tree. main.js loads
 // renderer/overlay.html, renderer/brain.html, preload.mjs, and assets/tray.png;
 // a missing symlink surfaces as ERR_FILE_NOT_FOUND on npm start.

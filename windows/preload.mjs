@@ -48,6 +48,11 @@ contextBridge.exposeInMainWorld('flyAPI', {
   saveLesson: (name, data) => ipcRenderer.invoke('lessons:save', { name, data }),
   loadLesson: (name) => ipcRenderer.invoke('lessons:load', name),
 
+  // fly-neuron-activity-bars: the Brain Stats window reads its
+  // config via this single invoke channel. The main process holds
+  // the file path; the renderer is fully read-only here.
+  brainStats: () => ipcRenderer.invoke('brain-stats:read'),
+
   // debug: forward renderer console to main process log
   sendLog: (level, args) => ipcRenderer.send('renderer-log', { level, args }),
 });

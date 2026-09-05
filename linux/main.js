@@ -22,6 +22,7 @@ import { dirname, resolve, join } from 'node:path';
 import { existsSync, promises as fsp, unlinkSync } from 'node:fs';
 import { sense } from './src/os.js';
 import { loadBrainData } from './src/data.js';
+import { loadConfig as loadBrainStatsConfig } from './src/brain-stats-config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -117,12 +118,14 @@ export function planOverlays(allDisplays, activeDisplayId) {
  *   onSetTheme: (name: string) => void,
  *   onSetSize: (size: number) => void,
  *   onToggleTrainer: () => void,
+ *   onToggleStats: () => void,
  *   onQuit: () => void,
  *   activeDisplayId: number,
  *   displayCount: number,
  *   paused: boolean,
  *   brainVisible: boolean,
  *   trainerVisible: boolean,
+ *   statsVisible: boolean,
  *   currentTheme: string,
  *   currentSize: number,
  * }} ctx
@@ -140,6 +143,7 @@ export function buildTrayMenu(ctx) {
       label: 'Brain',
       submenu: [
         { label: ctx.trainerVisible ? 'Hide Trainer' : 'Open Trainer', click: ctx.onToggleTrainer },
+        { label: ctx.statsVisible ? 'Hide Stats' : 'Show Stats', click: ctx.onToggleStats },
       ],
     },
     {
@@ -244,7 +248,15 @@ export function createOverlayWindow(display, linuxDir, hidden) {
   // Pipe renderer console so we can debug the overlay from the terminal
   // without opening DevTools. The renderer forwards all console.* through
   // the flyAPI.sendLog IPC channel and the preload exposes it.
-  win.webContents.on('console-message', (_e, level, msg, line, src) => {
+  // Electron 32+ uses an object payload; the (level, msg, line, src)
+  // form is pre-32. Handle both so we get the breadcrumb either way.
+  win.webContents.on('console-message', (...args) => {
+    let level, msg, line, src;
+    if (args.length >= 4 && typeof args[1] === 'number') {
+      [level, msg, line, src] = args.slice(1);
+    } else {
+      ({ level, message: msg, lineNumber: line, sourceId: src } = args[1] || {});
+    }
     const tag = ['V', 'I', 'W', 'E'][level] || '?';
     process.stderr.write(`[overlay ${tag}] ${msg}  (${src}:${line})\n`);
   });
@@ -357,6 +369,61 @@ function toggleTrainer() {
   refreshTray();
 }
 
+// Phase C: Brain Stats window — bar-chart panel for the 9 command
+// populations. The renderer reads brain-stats.json via the
+// `brain-stats:read` IPC channel and consumes the same `state` IPC
+// stream that drives the brain window's state line. Window size
+// matches the brain window so all three "Fly Wire" windows look
+// like siblings.
+let statsWindow = null;
+let statsVisible = false;
+export function createStatsWindow(primary, linuxDir) {
+  const W = 360, H = 300;
+  // Stack the stats window above the brain window in the bottom-right
+  // corner. The brain window is `BRAIN_H` tall with `PAD` margin, so
+  // we shift up by that amount + a small gap. The constants are
+  // named so future window-size changes update the layout in one place.
+  const BRAIN_H = 300;
+  const PAD = 18;
+  const GAP = 2;
+  const win = new BrowserWindow({
+    x: primary.workArea.x + primary.workArea.width - W - PAD,
+    y: primary.workArea.y + primary.workArea.height - H - PAD - (BRAIN_H + PAD + GAP),
+    width: W,
+    height: H,
+    title: 'Brain Stats — population activity',
+    backgroundColor: '#0c0f15',
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    show: false,
+    webPreferences: {
+      preload: resolve(linuxDir, 'preload.mjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  win.setMenu(null);
+  win.on('close', (e) => {
+    if (!app.isQuitting) { e.preventDefault(); win.hide(); statsVisible = false; refreshTray(); }
+  });
+  win.loadFile(resolve(linuxDir, '..', 'windows', 'renderer', 'brain-stats.html'));
+  win.once('ready-to-show', () => { if (statsVisible) win.show(); });
+  return win;
+}
+function toggleStats() {
+  if (!statsWindow || statsWindow.isDestroyed()) {
+    statsWindow = createStatsWindow(screen.getPrimaryDisplay(), __dirname);
+    statsVisible = true;
+    statsWindow.once('ready-to-show', () => statsWindow.show());
+  } else if (statsWindow.isVisible()) {
+    statsWindow.hide(); statsVisible = false;
+  } else {
+    statsWindow.show();   statsVisible = true;
+  }
+  refreshTray();
+}
+
 // ----- IPC bridge: the renderer (windows/renderer/overlay.js, symlinked)
 // expects 8 channels. Without them, its async IIFE rejects on
 // `api.getBrainData()` and the scene stays empty (white PNG).
@@ -431,10 +498,15 @@ ipcMain.on('spikes', (_e, list) => {
 });
 // Brain state readout (throttled to 10 Hz by the renderer). The brain
 // window subscribes via preload.mjs#onState and renders the line.
-// Spec: brain-state-readout.
+// The Brain Stats window subscribes to the same channel and uses the
+// `tag` to drive its per-population bar chart. Spec: brain-state-readout
+// and openspec/changes/fly-neuron-activity-bars.
 ipcMain.on('state', (_e, payload) => {
   if (brainWindow && !brainWindow.isDestroyed() && payload) {
     brainWindow.webContents.send('state', payload);
+  }
+  if (statsWindow && !statsWindow.isDestroyed() && payload) {
+    statsWindow.webContents.send('state', payload);
   }
 });
 // Brain window's click-to-stimulate -> forward to the overlay (the only one
@@ -454,6 +526,11 @@ const memoriesFile = () => join(app.getPath('userData'), 'food-memories.json');
 // Same pattern as memoriesFile but per-lesson instead of one big blob.
 const lessonsDir  = () => join(app.getPath('userData'), 'lessons');
 const lessonFile  = (name) => join(lessonsDir(), `${name}.json`);
+// fly-neuron-activity-bars: the Brain Stats window's config. Same
+// pattern as memoriesFile/lessonFile — read on demand by the
+// renderer, with built-in fallback to defaults on missing/malformed
+// JSON (see brain-stats.js#loadConfig).
+const brainStatsFile = () => join(app.getPath('userData'), 'brain-stats.json');
 
 ipcMain.handle('memories:load', async () => {
   try { return JSON.parse(await fsp.readFile(memoriesFile(), 'utf8')); }
@@ -493,6 +570,14 @@ ipcMain.handle('lessons:load', async (_e, name) => {
   try { return await fsp.readFile(lessonFile(name), 'utf8'); }
   catch { return null; }
 });
+
+// fly-neuron-activity-bars: returns the Brain Stats config. The
+// renderer is the consumer; the main process only persists the
+// file (the user edits it by hand). The renderer's `loadConfig`
+// (windows/src/brain-stats.js) handles the missing/malformed case
+// with the same defaults as the main process — we just call it
+// here so the contract is one source of truth.
+ipcMain.handle('brain-stats:read', () => loadBrainStatsConfig(brainStatsFile()));
 
 // Forward every renderer console.{log,info,warn,error} to main stderr.
 // Used to debug the overlay without opening DevTools (X11+electron: DevTools
@@ -631,12 +716,14 @@ function refreshTray() {
       refreshTray();
     },
     onToggleTrainer: toggleTrainer,
+    onToggleStats: toggleStats,
     onQuit: () => { app.isQuitting = true; app.quit(); },
     activeDisplayId,
     displayCount: allDisplays.length,
     paused,
     brainVisible,
     trainerVisible,
+    statsVisible,
     currentTheme,
     currentSize,
   }));
@@ -682,8 +769,16 @@ async function runSnapshot(outPath) {
     width: 720, height: 720,
   });
   // Pipe renderer console so we see the IIFE failure path.
-  win.webContents.on('console-message', (_e, level, msg) => {
-    console.log(`[renderer] ${msg}`);
+  // Electron 32+ uses an object payload; the (level, msg) form is
+  // pre-32. Handle both so we get the breadcrumb either way.
+  win.webContents.on('console-message', (...args) => {
+    let level, msg, line, src;
+    if (args.length >= 4 && typeof args[1] === 'number') {
+      [level, msg, line, src] = args.slice(1);
+    } else {
+      ({ level, message: msg, lineNumber: line, sourceId: src } = args[1] || {});
+    }
+    console.log(`[renderer ${level}] ${msg}  (${src}:${line})`);
   });
   win.webContents.on('render-process-gone', (_e, d) => {
     console.error('[renderer] gone:', d);
@@ -723,6 +818,11 @@ async function runSnapshot(outPath) {
 }
 
 async function runBrainshot(outPath) {
+  // The brainshot is a debugging/CI path used to verify the brain window
+  // renders correctly without spinning up a desktop session. It must
+  // match the live brain window dimensions (340x300; see createBrainWindow)
+  // so the camera/centering math in brain.js sees the same viewport it
+  // will see in the real app.
   const win = new BrowserWindow({
     show: false,
     paintWhenInitiallyHidden: true,
@@ -732,10 +832,36 @@ async function runBrainshot(outPath) {
       preload: resolve(__dirname, 'preload.mjs'),
       sandbox: false,
     },
-    width: 720, height: 560,
+    width: 340, height: 300,
   });
+  // Pipe renderer console so we see the IIFE failure path.
+  // Electron 32+ uses an object payload; the (level, msg) form is
+  // pre-32. Handle both so we get the breadcrumb either way.
+  win.webContents.on('console-message', (...args) => {
+    let level, msg, line, src;
+    if (args.length >= 4 && typeof args[1] === 'number') {
+      [level, msg, line, src] = args.slice(1);
+    } else {
+      ({ level, message: msg, lineNumber: line, sourceId: src } = args[1] || {});
+    }
+    console.log(`[brainshot ${level}] ${msg}  (${src}:${line})`);
+  });
+  // brainData is normally loaded in run() (the interactive path). The
+  // brainshot CLI branch never runs that, so load on demand here too —
+  // otherwise the renderer's getBrainData() returns null and brain.js
+  // bails before building the point clouds.
+  if (!brainData) {
+    try { brainData = loadBrainData(); } catch (e) {
+      console.warn('[desktop-fly] no data/ for brainshot:', e.message);
+    }
+  }
   await win.loadFile(resolve(__dirname, 'renderer/brain.html'));
-  await new Promise(r => win.webContents.once('paint', r));
+  // brain.js's IIFE does `await api.getBrainData()` and then calls build(),
+  // which adds the point clouds and computes the camera distance. The
+  // first 'paint' event fires before the IPC reply arrives, so a single
+  // paint-await captures the empty scene. Sleep long enough for the
+  // fetch + build + at least one rendered frame.
+  await new Promise(r => setTimeout(r, 1500));
   const img = await win.webContents.capturePage();
   await savePng(img, outPath);
   win.close();

@@ -159,6 +159,23 @@ The brain-trainer window has a second tab, **Memory**, that reads
 the snapshot on demand and on a 30 s poll and renders the top 20
 edges by `|w|` as horizontal bars — green for LTP, red for LTD.
 
+## Brain Stats (population activity)
+
+The Windows port currently has the `brain-stats:read` IPC channel
+but **not** the Brain Stats window itself. To get the bar chart
+on Windows today, run the Linux port — the symlinked source in
+`linux/renderer/brain-stats.{html,js}` works there out of the
+box. The aggregator and config schema are platform-agnostic; the
+window construction is the only Linux-only piece.
+
+When the Windows port catches up, the new window will render two
+horizontal bars per neuron (Lifetime + Recent over the last
+`window_seconds` seconds). The default config
+(`LC4, LPLC2, GF, DNa01, DNa02, DNp09, DNg11, MDN, escW`,
+metric `sum_duration`, window `60 s`) lives in
+`%APPDATA%/desktop-fly/brain-stats.json` and is hot-reloaded
+every second.
+
 ## Reading the brain window
 
 The brain window has a thin status bar at the top. The left side is

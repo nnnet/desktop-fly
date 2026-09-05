@@ -444,18 +444,19 @@ function checkReaches(fly) {
       zoneContactLogged.add(key);
       console.info(`[zone] predator loom id=${nearestPredator.id} fly=#${flyIdx} d=${nearestD.toFixed(0)} bias=${out.predatorAttract.toFixed(3)}`);
     }
-    // Escape reflex: a nearby predator drives the giant fiber (DNp01)
-    // directly. Without this sim input the fly stays in idle even
-    // though the heading-bias is firing. The threshold (300 pt) is
-    // inside PREDATOR_RANGE (900) and matches the loom-detector
-    // sensitivity used by the connectome's loom pathway. We only
-    // fire on loom (i.e. each zone, only once); the per-frame
-    // check is gated by the contact log so a long stay in range
-    // does not over-stimulate.
-    if (sim && sim.gf && nearestD < 300 && !zoneContactLogged.has(key + ':escape')) {
-      // mark a separate key so the loom log and the escape log
-      // are independent (re-entering range can re-fire both).
-      zoneContactLogged.add(key + ':escape');
+    // Escape reflex: a nearby predator drives the giant fiber
+    // (DNp01) every frame the fly is within the close-approach
+    // range (< 300 pt). The previous version rate-limited the
+    // stim via zoneContactLogged, which meant a second predator
+    // (or a predator re-spawned after the user closed the
+    // trainer) would never re-arm the escape reflex. sim.stimulate
+    // is already internally rate-limited (max 8 pendingStims)
+    // so re-firing every frame is safe — the GF current
+    // saturates and the gfLatch fires reliably. The 80ms stim
+    // duration overlaps the next per-frame stim, so the fly
+    // gets a continuous giant-fiber drive for as long as the
+    // predator is close.
+    if (sim && sim.gf && nearestD < 300) {
       sim.stimulate(sim.gf, 0.6, 80);
     }
   }

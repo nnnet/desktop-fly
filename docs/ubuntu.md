@@ -193,6 +193,34 @@ The signed `dW` is shown to 4-decimal precision. The tab falls back
 to a `No learning yet` placeholder when the snapshot is missing or
 empty.
 
+## Brain Stats (population activity)
+
+Tray → **Brain** → **Show Stats** opens a 360×300 window that
+consumes the same `state` IPC stream that drives the brain
+window's state line and renders, for each of the 9 command
+populations (LC4, LPLC2, GF, DNa01, DNa02, DNp09, DNg11, MDN,
+escW), **two horizontal bars**: a Lifetime bar (whole session) and
+a Recent bar (last `window_seconds`, default 60 s). The metric
+and the window are read from
+`~/.config/desktop-fly/brain-stats.json` (auto-created with
+defaults on first launch); the file is hot-reloaded every second.
+Available keys:
+
+```json
+{
+  "neurons": ["LC4", "LPLC2", "GF", "DNa01", "DNa02", "DNp09", "DNg11", "MDN", "escW"],
+  "metric": "sum_duration",
+  "window_seconds": 60
+}
+```
+
+- `metric` — `"count"` (number of state events in the window) or
+  `"sum_duration"` (seconds spent in that state).
+- `window_seconds` — the rolling window size; set to `0` to
+  hide the recent bar.
+- `neurons` — any subset or superset of the 9 default names;
+  unknown names render a disabled row, they do not crash.
+
 ## Game mode (food, mate, predator)
 
 The tray has a **Game** submenu with five entries:

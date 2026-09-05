@@ -136,6 +136,39 @@ The bar labels show the signed `dW` to 4-decimal precision. The tab
 falls back to a `No learning yet — fly has not eaten or fled.`
 placeholder when the snapshot is missing or empty.
 
+## Brain Stats (population activity)
+
+Tray → **Brain** → **Show Stats** opens a 360×300 window that
+consumes the same `state` IPC stream that drives the brain
+window's state line and renders, for each of the 9 command
+populations (LC4, LPLC2, GF, DNa01, DNa02, DNp09, DNg11, MDN,
+escW), **two horizontal bars**:
+
+- **Lifetime** — the metric value across the whole session
+- **Recent** — the same metric over the last `window_seconds`
+  (default 60 s)
+
+The metric and the window are read from
+`~/.config/desktop-fly/brain-stats.json` (auto-created with
+defaults on first launch). The file is hot-reloaded every second —
+edit it while the window is open and the next render uses the new
+values. Available keys:
+
+```json
+{
+  "neurons": ["LC4", "LPLC2", "GF", "DNa01", "DNa02", "DNp09", "DNg11", "MDN", "escW"],
+  "metric": "sum_duration",
+  "window_seconds": 60
+}
+```
+
+- `metric` — `"count"` (number of state events in the window) or
+  `"sum_duration"` (seconds spent in that state).
+- `window_seconds` — the rolling window size; set to `0` to
+  hide the recent bar.
+- `neurons` — any subset or superset of the 9 default names;
+  unknown names render a disabled row, they do not crash.
+
 ## Game mode (food, mate, predator)
 
 The tray has a **Game** submenu:
@@ -232,14 +265,16 @@ not churn at 60 fps; transitions still appear within 100 ms.
 
 | file | contents |
 |---|---|
-| `main.js` | Electron main: per-monitor overlays, brain + trainer windows, tray, environment senses |
+| `main.js` | Electron main: per-monitor overlays, brain + trainer + stats windows, tray, environment senses |
 | `preload.mjs` | the only main↔renderer bridge (symlink to `../windows/preload.mjs`) |
 | `renderer/overlay.js` | `buildScene` + `Coordinator` from `main.swift` (symlinked from `../windows/renderer/`) |
 | `renderer/brain.js` | port of `BrainView.swift` |
 | `renderer/brain-trainer.js` | optogenetic lesson player |
+| `renderer/brain-stats.js` | per-population bar chart (lifetime + recent window) |
 | `src/sim.js` | port of `Sim.swift` (`LIFSim`, `SpikeBus`, `BrainSignals`) — symlinked |
 | `src/flymodel.js` | port of `FlyModel.swift` (body geometry + behavior) — symlinked |
 | `src/attract.js` | sugar/mate attraction math (symlinked) |
+| `src/brain-stats.js` | `BrainStats` aggregator + `loadConfig` (symlinked) |
 | `src/signals.js` | port of `SignalBuilder` (symlinked) |
 | `src/environment.js` | circadian curve, CPU-load tempo (symlinked) |
 | `src/data.js` | Node-only JSON loading (symlinked) |
