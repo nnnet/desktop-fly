@@ -225,6 +225,40 @@ function build(points, circuit) {
   stimRing = new THREE.Mesh(new THREE.SphereGeometry(2.2, 20, 14), rm);
   stimRing.visible = false;
   group.add(stimRing);
+
+  // Centre the brain in the camera view. The neuron positions come
+  // from the FlyWire data file (data/brain_points.json) and the
+  // circuit JSON; they are NOT necessarily centred around the
+  // origin. Compute the bounding box, shift the group so the box
+  // is centred at the origin, and point the camera at it. The
+  // result is the same brain visualisation but always centred
+  // regardless of how the source data was offset.
+  const box = new THREE.Box3();
+  group.children.forEach((c) => {
+    if (!c.geometry || !c.geometry.boundingBox) c.geometry.computeBoundingBox();
+    if (c.geometry && c.geometry.boundingBox) box.union(c.geometry.boundingBox);
+  });
+  // Sphere-based markers (GF, stimRing) do not contribute to
+  // geometry.boundingBox. The position cloud dominates.
+  const centre = new THREE.Vector3();
+  box.getCenter(centre);
+  group.position.sub(centre);
+  // After shifting the group by -centre, the brain sits at the
+  // origin. The camera was at (0, 0.6, 29); keep that target by
+  // pointing it at the origin (it already does, by default).
+  camera.lookAt(0, 0, 0);
+  // Move the camera so the brain fits the viewport. The bounding
+  // sphere radius is half the box diagonal; the perspective
+  // camera's fov=46 deg gives a frustum half-angle of 23 deg, so
+  // the distance needed is radius / tan(23 deg) ~= radius * 2.4.
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const r = size.length() * 0.5;
+  const fov = camera.fov * Math.PI / 180;
+  const distance = r / Math.sin(fov * 0.5) + 5;   // +5 padding
+  camera.position.set(0, 0.6, distance);
+  camera.lookAt(0, 0, 0);
+  camera.updateProjectionMatrix();
 }
 
 function flash(neuron, isGF) {
