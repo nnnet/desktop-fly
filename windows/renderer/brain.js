@@ -12,6 +12,86 @@ import * as THREE from '../node_modules/three/build/three.module.js';
 
 const api = window.flyAPI;
 const labelEl = document.getElementById('label');
+const stateTagEl = document.querySelector('#state-line .tag');
+const stateRatesEl = document.querySelector('#state-line .rates');
+const stateProxEl = document.querySelector('#state-line .prox');
+
+// Show the proximity suffix when any influence is within 300pt. That
+// matches the threshold overlay.js uses to fire `sim.stimulate(sim.gf,
+// ...)` for the predator GF-stimulation path, so the suffix and the
+// stim stay in lock-step.
+const PROX_DISPLAY_PT = 300;
+
+// Typical-max Hz for each of the nine populations the brain state line
+// shows. The renderer divides the live rate by this number to normalise
+// to [0, 1] (capped). The values are conservative: a typical loom burst
+// peaks at ~180 Hz on LC4 (so 250 leaves headroom for an extra-strong
+// loom); the rest are tuned to leave the steady-state above 0.05 and
+// a typical burst below 1.0. Spec: brain-state-readout "Numeric rates
+// for nine populations".
+const RATE_TYP_MAX = {
+  LC4:   250,
+  LPLC2: 250,
+  GF:    30,    // GF only spikes a few times per escape; per-neuron Hz is small
+  DNa01: 60,
+  DNa02: 60,
+  DNp09: 50,
+  DNg11: 100,
+  MDN:   50,
+  escW:  60,
+};
+const RATE_ORDER = ['LC4', 'LPLC2', 'GF', 'DNa01', 'DNa02', 'DNp09', 'DNg11', 'MDN', 'escW'];
+
+function fmt3(v) {
+  // Clamp to [0, 1] and render with 3-decimal precision. Spec: brain-state-readout
+  // "3-decimal precision".
+  const x = Math.max(0, Math.min(1, v));
+  return x.toFixed(3);
+}
+
+function renderProxSuffix(payload) {
+  // Build "pred 47pt · sgr 220pt · mate —" or empty when no influence
+  // is currently close. We use the dot-separator style and an em-dash
+  // for "no zone of this kind exists" so the user can tell the two
+  // apart from a real distance value.
+  const p = payload.proximity || {};
+  const esc = Number(payload.escapeTeach) || 0;
+  const parts = [];
+  const fmt = (label, v) => {
+    if (v === null || v === undefined) return `${label} —`;
+    if (typeof v !== 'number' || !isFinite(v)) return `${label} ?`;
+    return `${label} ${Math.round(v)}pt`;
+  };
+  const predClose = p.predator !== null && p.predator !== undefined && p.predator < PROX_DISPLAY_PT;
+  const sugarClose = p.sugar !== null && p.sugar !== undefined && p.sugar < PROX_DISPLAY_PT;
+  const mateClose  = p.mate  !== null && p.mate  !== undefined && p.mate  < PROX_DISPLAY_PT;
+  if (predClose)  parts.push(fmt('pred', p.predator));
+  if (sugarClose) parts.push(fmt('sgr',  p.sugar));
+  if (mateClose)  parts.push(fmt('mate', p.mate));
+  if (esc > 0.001) parts.push(`<span class="esc">esc ${esc.toFixed(2)}</span>`);
+  if (parts.length === 0) {
+    stateProxEl.innerHTML = '';
+    return;
+  }
+  stateProxEl.innerHTML = parts.join(' · ');
+}
+
+function renderState(payload) {
+  if (!payload) return;
+  stateTagEl.textContent = payload.tag || '—';
+  if (payload.rates) {
+    stateRatesEl.textContent = RATE_ORDER.map((k) => {
+      const hz = payload.rates[k] || 0;
+      return `${k}=${fmt3(hz / RATE_TYP_MAX[k])}`;
+    }).join('  ');
+  }
+  renderProxSuffix(payload);
+}
+
+// onState: throttled brain state readout from the overlay renderer. We
+// just re-render the line — there's no animation or canvas update
+// involved. Spec: brain-state-readout.
+if (api.onState) api.onState((p) => renderState(p));
 
 // super_class palette (index order from etl.py)
 const CLASS_COLORS = [
@@ -90,7 +170,38 @@ function makeFlashMaterial(rgb) {
   });
 }
 
+// Circuit is loaded once and stored at module scope so the
+// memory panel can resolve edge #i to "<pre>→<post>" labels.
+// circuit.neurons[i].role is one of: lc4, lplc2, dna01, dna02,
+// dnp09, dng11, mdn, escw, gf, ascend, sens. circuit.edges[i]
+// is [preIdx, postIdx] and lines up with sim.w[i] (and with
+// food-memories.json's weights array).
+let circuitCache = null;
+function roleLabel(idx) {
+  if (!circuitCache) return `n${idx}`;
+  const nr = circuitCache.neurons[idx];
+  if (!nr) return `n${idx}`;
+  const r = nr.role || 'n';
+  // Shorten the long ones for the compact bar label.
+  if (r === 'lc4') return 'LC4';
+  if (r === 'lplc2') return 'LPLC2';
+  if (r === 'dna01') return 'DNa01';
+  if (r === 'dna02') return 'DNa02';
+  if (r === 'dnp09') return 'DNp09';
+  if (r === 'dng11') return 'DNg11';
+  if (r === 'mdn')   return 'MDN';
+  if (r === 'escw')  return 'escW';
+  if (r === 'gf')    return 'GF';
+  return r.toUpperCase();
+}
+function edgeLabel(i) {
+  if (!circuitCache || !circuitCache.edges || !circuitCache.edges[i]) return `edge #${i}`;
+  const [pre, post] = circuitCache.edges[i];
+  return `${roleLabel(pre)}→${roleLabel(post)}`;
+}
+
 function build(points, circuit) {
+  circuitCache = circuit;
   // full brain: 23k real somas
   const pts = points.points;
   const pos = new Float32Array(pts.length * 3);
@@ -149,6 +260,48 @@ function build(points, circuit) {
   stimRing = new THREE.Mesh(new THREE.SphereGeometry(2.2, 20, 14), rm);
   stimRing.visible = false;
   group.add(stimRing);
+
+  // Centre the brain in the camera view. The neuron positions come
+  // from the FlyWire data file (data/brain_points.json) and the
+  // circuit JSON; they are NOT necessarily centred around the
+  // origin (the actual data is roughly centred, but we do not
+  // trust the data; we re-centre at runtime). Compute the bounding
+  // box of the point clouds only, shift the group by -centre so
+  // the brain sits at the origin, and point the camera at it.
+  //
+  // Why only point clouds? The stimRing (sphere radius 2.2) and the
+  // 48 flash pool spheres (radius 0.16) all sit at (0,0,0); they
+  // are not part of the brain. Including them inflates the bbox
+  // away from the brain silhouette and the resulting centre is
+  // pulled off-axis (the stimRing alone pulls the Y centre up by
+  // ~1 unit, which then drives the brain to the lower half of
+  // the frame).
+  const box = new THREE.Box3();
+  group.children.forEach((c) => {
+    // THREE.Points is the brain points; skip Mesh children (the
+    // GF sphere, stimRing, flash pool). The brain points are the
+    // only ones whose bounding box is the brain silhouette.
+    if (!(c instanceof THREE.Points)) return;
+    if (!c.geometry.boundingBox) c.geometry.computeBoundingBox();
+    if (c.geometry.boundingBox) box.union(c.geometry.boundingBox);
+  });
+  const centre = new THREE.Vector3();
+  box.getCenter(centre);
+  group.position.sub(centre);
+  // The brain is now centred around the origin in world space.
+  // The camera looks at (0, 0, 0) and is far enough back that
+  // the entire brain silhouette fits the frustum. The Y
+  // component of the camera position keeps the same slight
+  // top-down angle as before (0.6) so the brain is not dead-on.
+  camera.lookAt(0, 0, 0);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const r = size.length() * 0.5;
+  const fov = camera.fov * Math.PI / 180;
+  const distance = r / Math.sin(fov * 0.5) + 5;   // +5 padding
+  camera.position.set(0, 0.6, distance);
+  camera.lookAt(0, 0, 0);
+  camera.updateProjectionMatrix();
 }
 
 function flash(neuron, isGF) {

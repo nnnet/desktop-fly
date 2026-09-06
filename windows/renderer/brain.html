@@ -9,16 +9,44 @@
                font: 11px "Segoe UI", system-ui, sans-serif; }
   canvas { display: block; }
   #label {
-    position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%);
-    padding: 4px 8px; border-radius: 6px;
+    position: fixed; left: 50%; top: 0; width: 340px;
+    padding: 4px 8px; border-radius: 0 0 6px 6px;
     background: rgba(0, 0, 0, 0.55); color: #f2f2f2; font-weight: 500;
     white-space: nowrap; pointer-events: none; opacity: 0;
-    transition: opacity 0.15s;
+    transition: opacity 0.15s; transform: translateX(-50%);
   }
   #label.on { opacity: 1; }
+  #state-line {
+    position: fixed; left: 0; right: 0; top: 0;
+    min-height: 18px;
+    display: flex; align-items: center; flex-wrap: wrap;
+    gap: 4px 8px; padding: 2px 8px;
+    background: rgba(0, 0, 0, 0.65); color: #d8d8d8;
+    font: 11px "Consolas", monospace;
+    border-bottom: 1px solid #1f2530; z-index: 10;
+    overflow: hidden;
+  }
+  #state-line .tag { font-weight: 700; color: #ffd23f;
+                     flex: 0 0 auto; }
+  #state-line .rates { color: #8a96a8; font-size: 10px;
+                       /* Allow the rate string to wrap when the
+                          window is narrow (the brain window is only
+                          340px wide and the 9 rate values overflow).
+                          Each rate (LC4=0.123) stays on its own chunk
+                          for legibility. */
+                       white-space: normal; flex: 1 1 auto;
+                       line-height: 1.15; }
+  #state-line .prox { color: #ff8080; font-size: 10px;
+                      white-space: nowrap; overflow: hidden;
+                      text-overflow: ellipsis; flex: 0 0 auto;
+                      margin-left: 8px; }
+  #state-line .prox .esc { color: #c8a0ff; }
+  #state-line .prox .none { display: none; }
 </style>
 </head>
 <body>
+<div id="state-line"><span class="tag">—</span><span class="rates"></span><span class="prox"></span></div>
+<div id="memory-panel"></div>
 <div id="label"></div>
 <script type="module" src="./brain.js"></script>
 </body>

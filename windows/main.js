@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { loadBrainData } from './src/data.js';
 import { circadianActivity, ThermalTempo } from './src/environment.js';
 import { listWindows, pollMouseButtons, win32Available } from './src/win32.js';
+import { loadConfig as loadBrainStatsConfig } from './src/brain-stats-config.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEBUG = !!process.env.DESKTOPFLY_DEBUG;
@@ -112,6 +113,8 @@ function createOverlay(b) {
 }
 
 function createBrain(d) {
+  // Original brain window size. The bar charts and the stats
+  // panel live in the trainer window.
   const W = 340, H = 300;
   const win = new BrowserWindow({
     x: d.workArea.x + d.workArea.width - W - 18,
@@ -196,7 +199,32 @@ function buildTrayMenu() {
         click: () => send(overlay, 'cmd', { name: 'stim', group }),
       })),
     },
+    {
+      label: 'Trainer',
+      submenu: [
+        { label: 'Reward walk (DNp09)',  click: () => send(overlay, 'cmd', { name: 'reward', target: 'walk' }) },
+        { label: 'Reward groom (DNg11)', click: () => send(overlay, 'cmd', { name: 'reward', target: 'groom' }) },
+        { label: 'Punish escape (GF)',   click: () => send(overlay, 'cmd', { name: 'punish', target: 'escape' }) },
+        { label: 'Punish backward (MDN)', click: () => send(overlay, 'cmd', { name: 'punish', target: 'backward' }) },
+        { type: 'separator' },
+        { label: 'Enable Hebbian plasticity',
+          click: () => send(overlay, 'cmd', { name: 'enablePlasticity', eta: 1e-4, alpha: 1e-7 }) },
+        { label: 'Disable plasticity',  click: () => send(overlay, 'cmd', { name: 'disablePlasticity' }) },
+        { label: 'Reset weights',       click: () => send(overlay, 'cmd', { name: 'resetTraining' }) },
+      ],
+    },
     ...(multi ? [{ label: 'Send Fly to Next Display', click: sendFlyToNextDisplay }] : []),
+    { type: 'separator' },
+    {
+      label: 'Game',
+      submenu: [
+        { label: 'Spawn Sugar Zone', click: () => send(overlay, 'cmd', { name: 'spawnSugar' }) },
+        { label: 'Spawn Near Fly',    click: () => send(overlay, 'cmd', { name: 'spawnNear' }) },
+        { label: 'Spawn Predator',   click: () => send(overlay, 'cmd', { name: 'spawnPredator' }) },
+        { label: 'Spawn Mate',       click: () => send(overlay, 'cmd', { name: 'spawnMate' }) },
+        { label: 'Clear Zones',      click: () => send(overlay, 'cmd', { name: 'clearZones' }) },
+      ],
+    },
     { label: 'Add Fly', click: () => send(overlay, 'cmd', { name: 'addFly' }) },
     { label: 'Remove Fly', click: () => send(overlay, 'cmd', { name: 'removeFly' }) },
     { label: 'Scare Flies', click: () => send(overlay, 'cmd', { name: 'scareAll' }) },
@@ -338,7 +366,21 @@ app.whenReady().then(() => {
 
   desktop = virtualBounds();
   overlay = createOverlay(desktop);
-  overlay.webContents.once('did-finish-load', publishGeometry);
+  // boot-config: send the default theme/size before any Fly is created.
+  // Linux CLI flags will be added in a follow-up; for now Windows uses
+  // the FLY_THEME/FLY_SIZE env vars via process.env (mirrors what
+  // linux/main.js does) or falls back to the FLY_THEMES / FLY_SCALE
+  // defaults baked into flymodel.js.
+  const bootCfg = {
+    theme: (process.env.FLY_THEME || 'orange').toLowerCase(),
+    size:  Number.isFinite(Number(process.env.FLY_SIZE))
+      ? Math.max(0.3, Math.min(5.0, Number(process.env.FLY_SIZE)))
+      : 1.0,
+  };
+  overlay.webContents.once('did-finish-load', () => {
+    publishGeometry();
+    overlay.webContents.send('boot-config', bootCfg);
+  });
   overlay.on('resize', publishGeometry);
   overlay.on('move', publishGeometry);
   if (brainData) brain = createBrain(screen.getPrimaryDisplay());
@@ -358,7 +400,49 @@ app.whenReady().then(() => {
 
 ipcMain.handle('brain-data', () => brainData);
 ipcMain.on('spikes', (_e, list) => send(brain, 'spikes', list));
+ipcMain.on('state', (_e, payload) => send(brain, 'state', payload));
 ipcMain.on('stimulate', (_e, req) => send(overlay, 'stimulate', req));
+
+// Hebbian food-memories persistence. The file lives in userData so it
+// survives app restarts but is wiped on uninstall. Format: a single JSON
+// object with a version, the weight Float32Array serialised as a plain
+// number[] (JSON has no typed-array encoding), and metadata.
+import { promises as fsp, existsSync, unlinkSync } from 'fs';
+import { join } from 'path';
+const memoriesFile = () => join(app.getPath('userData'), 'food-memories.json');
+// fly-neuron-activity-bars: the Brain Stats window's config. Read
+// on demand by the renderer; the same brain-stats.js#loadConfig
+// handles missing/malformed JSON with the default object.
+const brainStatsFile = () => join(app.getPath('userData'), 'brain-stats.json');
+
+ipcMain.handle('memories:load', async () => {
+  try {
+    const txt = await fsp.readFile(memoriesFile(), 'utf8');
+    return JSON.parse(txt);
+  } catch { return null; }
+});
+ipcMain.on('memories:save', async (_e, payload) => {
+  if (!payload || !Array.isArray(payload.weights)) return;
+  try {
+    const out = {
+      version: 1,
+      savedAt: new Date().toISOString(),
+      weights: payload.weights,
+      edgesTouched: payload.edgesTouched ?? 0,
+    };
+    await fsp.writeFile(memoriesFile(), JSON.stringify(out));
+  } catch (err) { console.warn('memories:save failed:', err); }
+});
+ipcMain.on('memories:clear', () => {
+  try { if (existsSync(memoriesFile())) unlinkSync(memoriesFile()); }
+  catch (err) { console.warn('memories:clear failed:', err); }
+});
+
+// fly-neuron-activity-bars: the Brain Stats window reads its
+// config via this channel. The renderer is fully read-only here;
+// the user edits the JSON file by hand. The loadConfig helper
+// already returns the default config on missing/malformed files.
+ipcMain.handle('brain-stats:read', () => loadBrainStatsConfig(brainStatsFile()));
 
 app.on('window-all-closed', () => { /* tray-only app: stay alive */ });
 app.on('before-quit', () => {

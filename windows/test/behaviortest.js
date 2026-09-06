@@ -7,6 +7,7 @@ import { LIFSim, makeSignals } from '../src/sim.js';
 import { SignalBuilder } from '../src/signals.js';
 import { Fly, FLY_SCALE, WANDER_JITTER } from '../src/flymodel.js';
 import { circadianActivity, makeLedge } from '../src/environment.js';
+import { foodAndMateAttract } from '../src/attract.js';
 import { rnd, lag, TUNED_HZ } from '../src/util.js';
 
 const data = loadBrainData();
@@ -275,6 +276,48 @@ bodyCheck('body timestep is frame-rate independent', () => {
   return [ok, `60Hz exact=${exact60 ? 'yes' : 'NO'}, lag 8x12.5ms ${fine.toFixed(6)} `
     + `vs 1x100ms ${coarse.toFixed(6)}, wander sd ${s60.toFixed(3)} @60Hz vs ${s120.toFixed(3)} @120Hz`];
 });
+
+// Sugar-seeking: a fly placed at origin, a sugar zone placed 200 pt due east.
+// Drive the sim for 8 s of walking, and the fly should reach the zone and
+// remove it via the food-reward pathway. We test the closed loop end-to-end
+// (Fly + sim + foodAndMateAttract) so any wiring mistake will be caught.
+{
+  const fly = new Fly({ x: 0, y: 0 });
+  fly.heading = 0;                  // facing +x, zone at +200 east
+  const sim = new LIFSim(data.circuit, null);
+  const zones = [{ id: 1, kind: 'sugar', x: 200, y: 0, r: 30 }];
+  // no fly.zones — we apply attract manually so the test mirrors the
+  // pure-function path, not whatever Fly.update happens to do internally
+  const bounds = { width: 800, height: 600 };
+  let reached = false;
+  let fwdOn = 0, total = 0;
+  const dt = 1 / 60;
+  for (let frame = 0; frame < 60 * 12; frame++) {
+    const d = Math.hypot(200 - fly.pos.x, 0 - fly.pos.y);
+    if (d < 220) sim.airPuff = Math.max(sim.airPuff, (1 - d / 220) * 0.10);
+    // proprioception from the fly's own walkingIntensity, like overlay.js
+    sim.gaitDrive = Math.max(0.4, fly.walkingIntensity ?? 0);
+    sim.gaitPhase = (frame % 30) / 30;
+    sim.step(16);
+    const r = foodAndMateAttract(fly, zones);
+    if (r.foodReached !== null) {
+      zones.length = 0;
+      if (sim.fwd.length)   sim.stimulate(sim.fwd, 0.5, 300);
+      if (sim.groom.length) sim.stimulate(sim.groom, 0.3, 200);
+      reached = true;
+      break;
+    }
+    fly.heading += r.foodAttract * 3.0 * dt;
+    fly.update(dt, bounds, null, null);
+    if (sim.rateFwd / 10 > 0.22) fwdOn++;
+    total++;
+  }
+  const detail = `reached=${reached}, fwdOn=${fwdOn}/${total}`
+    + `, end pos=(${fly.pos.x.toFixed(0)}, ${fly.pos.y.toFixed(0)})`;
+  const ok = reached && fwdOn > 0;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  fly reaches spawned sugar zone: ${detail}`);
+  if (!ok) failures++;
+}
 
 console.log(failures === 0 ? 'ALL BEHAVIOR TESTS PASS' : `${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

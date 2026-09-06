@@ -1,0 +1,1 @@
+../../windows/test/zone-motion.test.js

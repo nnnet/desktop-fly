@@ -105,8 +105,152 @@ sim.consumeGF();
 console.log(`click probes: GF cluster -> spike ${gfStim ? 'yes' : 'NO'}, `
   + `DNg11 cluster -> groom rate ${f(groomStim, 0)} Hz`);
 
-const pass = gfSpont === 0 && gfLoom > 0 && walkOn > 0 && gfStim && siestaPct > 3;
+// Phase 7: silence() — the trainer "punish" half. The silenced population
+// must drop well below its spontaneous rate while the stim is active.
+sim.consumeGF();
+// Bring DNg11 up to a stable rate first by stimulating it for a bit.
+sim.stimulate(sim.groom, 0.2, 500);
+for (let i = 0; i < 500; i++) sim.step(1);
+const groomBefore = sim.rateGroom;
+sim.silence(sim.groom, 500);
+let groomDuring = 0;
+let groomSamples = 0;
+for (let i = 0; i < 500; i++) {
+  sim.step(1);
+  if (i >= 100) { groomDuring += sim.rateGroom; groomSamples++; }   // skip the silence ramp
+}
+const groomDuringMean = groomDuring / Math.max(1, groomSamples);
+const silenceWorks = groomDuringMean < groomBefore * 0.5;
+console.log(`silence groom 500ms: ${f(groomBefore, 0)} -> ${f(groomDuringMean, 0)} Hz`
+  + (silenceWorks ? '' : ' (silence did not suppress the population)'));
+
+// Phase 8: Hebbian plasticity. A new sim with the same circuit, then 30 s of
+// strong DNp09 stimulation. At eta=1e-3 (10x the default) we want at least
+// one edge weight to grow. This is the trainer's whole point: repeated
+// pairing grows the synapse that delivered the reward.
+const sim2 = new LIFSim(data.circuit, null);
+const base = sim2.exportWeights();
+let maxDelta = 0;
+sim2.enablePlasticity({ eta: 1e-3, alpha: 0, stepMs: 100 });   // disable decay to isolate LTP
+for (let ms = 0; ms < 30000; ms++) {
+  if (sim2.fwd.length) sim2.stimulate(sim2.fwd, 0.3, 50);     // 50 ms pulse every 1 ms = 1.5 s on per s
+  sim2.step(1);
+}
+const trained = sim2.exportWeights();
+for (let k = 0; k < base.length; k++) {
+  if (base[k] !== 0) {
+    const d = trained[k] - base[k];
+    if (d > maxDelta) maxDelta = d;
+  }
+}
+const plasticWorks = maxDelta > 0;
+console.log(`plasticity 30s (eta=1e-3): max dW ${maxDelta.toExponential(2)}`
+  + (plasticWorks ? '' : ' (no edge grew — pair-based LTP did not fire)'));
+
+let pass = gfSpont === 0 && gfLoom > 0 && walkOn > 0 && gfStim && siestaPct > 3
+  && silenceWorks && plasticWorks;
+
+// Phase 11: predator escapeTeach. With plasticity on and a constant
+// escapeTeach=1, the average weight of sens->gf edges should DECREASE
+// over 30 s (the predator proximity teaches the fly to gate escape
+// through this pathway). Spec: fly-predator-zones "Predator exposure
+// teaches escape". The 50% floor is a separate scenario below.
+{
+  const simPred = new LIFSim(data.circuit, null);
+  const baseW = simPred.exportWeights();
+  // Sum baseline weight of every sens -> gf edge.
+  const sensIdx = simPred.sens || [];
+  const gfIdx = simPred.gf || [];
+  let baseSensGf = 0;
+  if (sensIdx.length && gfIdx.length) {
+    const gfSet = new Set(gfIdx);
+    for (let i = 0; i < sensIdx.length; i++) {
+      const pre = sensIdx[i];
+      const end = simPred.rowStart[pre + 1];
+      for (let k = simPred.rowStart[pre]; k < end; k++) {
+        if (gfSet.has(simPred.colIdx[k])) baseSensGf += baseW[k];
+      }
+    }
+  }
+  simPred.enablePlasticity({ eta: 1e-3, alpha: 1e-7, stepMs: 100 });
+  simPred.setEscapeTeach(1.0);    // full exposure
+  for (let ms = 0; ms < 30000; ms++) simPred.step(1);
+  const trainedW = simPred.exportWeights();
+  let trainedSensGf = 0;
+  if (sensIdx.length && gfIdx.length) {
+    const gfSet = new Set(gfIdx);
+    for (let i = 0; i < sensIdx.length; i++) {
+      const pre = sensIdx[i];
+      const end = simPred.rowStart[pre + 1];
+      for (let k = simPred.rowStart[pre]; k < end; k++) {
+        if (gfSet.has(simPred.colIdx[k])) trainedSensGf += trainedW[k];
+      }
+    }
+  }
+  // Pre-train: avg per edge; post-train: avg per edge; LTD is visible.
+  const baseAvg = baseSensGf / Math.max(1, sensIdx.length * gfIdx.length);
+  const trainedAvg = trainedSensGf / Math.max(1, sensIdx.length * gfIdx.length);
+  const ltdWorks = baseSensGf > 0 && trainedSensGf < baseSensGf;
+  // 50% floor: even after continuous exposure the average must stay above
+  // 50% of baseline (the plasticity alpha decay and the [0, 2*w0] clamp
+  // bound the drift).
+  const floor = 0.5 * baseSensGf;
+  const aboveFloor = trainedSensGf >= floor;
+  console.log(`predator teach 30s: sens->gf sum ${baseSensGf.toExponential(2)} -> `
+    + `${trainedSensGf.toExponential(2)} (avg ${baseAvg.toExponential(2)} -> `
+    + `${trainedAvg.toExponential(2)}, floor ${floor.toExponential(2)})`
+    + (ltdWorks ? '' : ' (no LTD fired)')
+    + (aboveFloor ? '' : ' (BELOW 50% floor — clamp/decay broken)'));
+  if (!ltdWorks) pass = false;
+  if (!aboveFloor) pass = false;
+}
+
+// Phase 9: food reward pathway. The renderer delivers a sugar reach as
+// sim.stimulate(sim.fwd, 0.5, 300) + sim.stimulate(sim.groom, 0.3, 200).
+// Run that once, then 1 s of free sim, and assert both DNp09 (rateFwd)
+// and DNg11 (rateGroom) rate-spiked relative to baseline.
+{
+  const sim3 = new LIFSim(data.circuit, null);
+  // warm-up: 2 s of ambient so baseline rates settle.
+  for (let ms = 0; ms < 2000; ms++) sim3.step(1);
+  const baseFwd = sim3.rateFwd;
+  const baseGroom = sim3.rateGroom;
+  if (sim3.fwd.length)   sim3.stimulate(sim3.fwd, 0.5, 300);
+  if (sim3.groom.length) sim3.stimulate(sim3.groom, 0.3, 200);
+  let fwdPeak = sim3.rateFwd, groomPeak = sim3.rateGroom;
+  for (let ms = 0; ms < 1000; ms++) {
+    sim3.step(1);
+    if (sim3.rateFwd > fwdPeak)   fwdPeak = sim3.rateFwd;
+    if (sim3.rateGroom > groomPeak) groomPeak = sim3.rateGroom;
+  }
+  const fwdReached   = fwdPeak   > baseFwd   + 1.0;
+  const groomReached = groomPeak > baseGroom + 1.0;
+  console.log(`food reach: DNp09 ${baseFwd.toFixed(1)}->peak ${fwdPeak.toFixed(1)} Hz,`
+    + ` DNg11 ${baseGroom.toFixed(1)}->peak ${groomPeak.toFixed(1)} Hz`
+    + (fwdReached && groomReached ? '' : ' (reward pulse did not propagate)'));
+  if (!(fwdReached && groomReached)) pass = false;
+}
+
+// Phase 10: mate close approach. The renderer fires sim.stimulate(sim.escw,
+// 0.35, 600) on close approach — wing extension as courtship surrogate.
+// Assert escw rate climbs during the pulse.
+{
+  const sim4 = new LIFSim(data.circuit, null);
+  for (let ms = 0; ms < 2000; ms++) sim4.step(1);
+  const baseEscw = sim4.rateEscW;
+  if (sim4.escw.length) sim4.stimulate(sim4.escw, 0.35, 600);
+  let peak = baseEscw;
+  for (let ms = 0; ms < 1000; ms++) {
+    sim4.step(1);
+    if (sim4.rateEscW > peak) peak = sim4.rateEscW;
+  }
+  const escwReached = peak > baseEscw + 5.0;
+  console.log(`mate close: escW ${baseEscw.toFixed(1)}->peak ${peak.toFixed(1)} Hz`
+    + (escwReached ? '' : ' (wing pulse did not propagate)'));
+  if (!escwReached) pass = false;
+}
+
 console.log(pass
-  ? 'PASS: GF silent at rest, fires on loom; locomotor drive fluctuates; stim works; siesta alive'
+  ? 'PASS: GF silent at rest, fires on loom; locomotor drive fluctuates; stim works; siesta alive; food+mate reach stimulate'
   : 'FAIL: tune weights/noise');
 process.exit(pass ? 0 : 1);

@@ -62,6 +62,10 @@ export class LIFSim {
 
     // groups
     this.loomLeft = []; this.loomRight = [];
+    // Per-type loom neuron indices for the brain state line. The combined
+    // loomLeft+loomRight count remains in `rateLoom`; the per-type rates
+    // are tracked separately so the UI can show LC4 vs LPLC2.
+    this.loomLC4 = []; this.loomLPLC2 = [];
     this.gf = [];
     this.dnaL = []; this.dnaR = [];
     this.mdn = []; this.fwd = []; this.groom = []; this.escw = [];
@@ -71,7 +75,9 @@ export class LIFSim {
       const nr = neurons[i];
       switch (nr.role) {
         case 'lc4': case 'lplc2':
-          (nr.side === 'left' ? this.loomLeft : this.loomRight).push(i); break;
+          (nr.side === 'left' ? this.loomLeft : this.loomRight).push(i);
+          (nr.role === 'lc4' ? this.loomLC4 : this.loomLPLC2).push(i);
+          break;
         case 'gf': this.gf.push(i); break;
         case 'dna01': case 'dna02':
           (nr.side === 'left' ? this.dnaL : this.dnaR).push(i); break;
@@ -119,6 +125,11 @@ export class LIFSim {
     for (const i of this.escw) this.roleCode[i] = 7;
     for (const i of this.gf) this.roleCode[i] = 8;
 
+    // Sets for LC4 vs LPLC2 split (used in the per-spike switch — we keep
+    // them on the sim so we don't recompute the Set per spike).
+    this._loomLC4Set = new Set(this.loomLC4);
+    this._loomLPLC2Set = new Set(this.loomLPLC2);
+
     // CSR adjacency, weights pre-scaled
     const edges = circuit.edges;
     const counts = new Int32Array(n);
@@ -155,6 +166,9 @@ export class LIFSim {
 
     // outputs
     this.rateLoom = 0;       // Hz per LC neuron (EMA)
+    this.rateLC4 = 0;        // Hz per LC4 neuron (EMA, separate from rateLoom)
+    this.rateLPLC2 = 0;      // Hz per LPLC2 neuron (EMA)
+    this.rateGF = 0;         // Hz per GF neuron (EMA)
     this.rateDNaL = 0;
     this.rateDNaR = 0;
     this.rateMDN = 0;
@@ -198,6 +212,58 @@ export class LIFSim {
     if (!indices || !indices.length) return;
     this.pendingStims.push({ idx: indices, strength, durationMs, untilMs: 0 });
     if (this.pendingStims.length > 8) this.pendingStims.shift();
+  }
+
+  // Trainer / "punish" half of optogenetics: zero the synaptic drive into
+  // and out of `indices` for `durationMs`. The membrane voltage is unchanged,
+  // so a silenced neuron still receives baseline current and Poisson noise
+  // but cannot pass spikes downstream. Used by Phase 1 of the trainer to
+  // take a behaviour off the board temporarily (e.g. "no GF escapes").
+  silence(indices, durationMs) {
+    if (!indices || !indices.length) return;
+    this.pendingStims.push({ idx: indices, strength: 0, durationMs, untilMs: 0, silent: true });
+    if (this.pendingStims.length > 8) this.pendingStims.shift();
+  }
+
+  // Hebbian plasticity: per-active-edge weight update. eta = LTP rate
+  // (typ. 1e-4), alpha = decay rate (typ. 1e-7), stepMs = how often to apply
+  // (typ. 100 ms; we don't need 1 ms resolution and 100ms saves a factor of
+  // 100 in CPU). Returns the number of edges touched. Backed by a clone
+  // of the original weights for clamping; this.w is mutated in place.
+  enablePlasticity(opts = {}) {
+    this.plasticEta = Number.isFinite(opts.eta) ? opts.eta : 1e-4;
+    this.plasticAlpha = Number.isFinite(opts.alpha) ? opts.alpha : 1e-7;
+    this.plasticStepMs = Number.isFinite(opts.stepMs) ? opts.stepMs : 100;
+    this.plasticMinRateHz = Number.isFinite(opts.minRateHz) ? opts.minRateHz : 1;
+    this.plasticW0 = new Float32Array(this.w);   // initial weights for clamp
+    this.plasticEnabled = true;
+    this.plasticLastMs = 0;
+    this.plasticEdgesTouched = 0;
+    this.escapeTeach = 0;
+  }
+  // setEscapeTeach(v ∈ [0,1]): the fly's current predator-proximity
+  // signal. Applied as additional LTD on sens -> escape (sensory ->
+  // giant-fiber) edges during the next plasticity step. The renderer
+  // calls this every frame with the latest fly.escapeTeach value.
+  // Spec: fly-predator-zones "Predator exposure teaches escape".
+  setEscapeTeach(v) {
+    this.escapeTeach = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;
+  }
+  disablePlasticity() { this.plasticEnabled = false; }
+  resetPlasticity() {
+    if (this.plasticW0) this.w.set(this.plasticW0);
+    this.plasticEdgesTouched = 0;
+  }
+  // Called by main process after each step (or each save tick) to snapshot
+  // the current weight matrix as a Float32Array (length = edges.length).
+  // Returns a fresh copy, not a view, so the caller can serialise freely.
+  exportWeights() {
+    return new Float32Array(this.w);
+  }
+  importWeights(arr) {
+    if (!arr || arr.length !== this.w.length) return false;
+    this.w.set(arr);
+    return true;
   }
 
   consumeGF() { const s = this.gfLatch; this.gfLatch = false; return s; }
@@ -254,7 +320,12 @@ export class LIFSim {
       // brain-window click stimulation
       for (const s of this.activeStims) {
         if (this.simMs >= s.untilMs) continue;
-        for (const i of s.idx) v[i] += s.strength;
+        if (s.silent) {
+          // trainer "punish" channel: clamp silenced neurons below threshold
+          for (const i of s.idx) v[i] = Math.min(v[i], -1.2);
+        } else {
+          for (const i of s.idx) v[i] += s.strength;
+        }
       }
 
       // deliver delayed inhibition scheduled for this millisecond
@@ -285,22 +356,43 @@ export class LIFSim {
 
       // group rates (Hz per neuron, EMA)
       let cLoom = 0, cDL = 0, cDR = 0, cM = 0, cF = 0, cG = 0, cW = 0;
+      let cLC4 = 0, cLPLC2 = 0, cGF = 0;
+      // Lookup which loom neurons belong to LC4 vs LPLC2 once per step;
+      // the per-spike path is hot so we keep the membership test to a
+      // single Uint8Array flag.
       for (let s = 0; s < nSpiked; s++) {
-        switch (this.roleCode[spiked[s]]) {
-          case 1: cLoom++; break;
-          case 2: cDL++; break;
-          case 3: cDR++; break;
-          case 4: cM++; break;
-          case 5: cF++; break;
-          case 6: cG++; break;
-          case 7: cW++; break;
-          case 8: this.gfLatch = true; break;
-          default: break;
+        const i = spiked[s];
+        const code = this.roleCode[i];
+        if (code === 1) {
+          cLoom++;
+          // loomLC4 / loomLPLC2 membership is stable for the lifetime of
+          // the sim; we use a Set per side for O(1) membership. For
+          // performance we trade a tiny bit of memory for the
+          // membership flag.
+          if (this._loomLC4Set && this._loomLC4Set.has(i)) cLC4++;
+          else if (this._loomLPLC2Set && this._loomLPLC2Set.has(i)) cLPLC2++;
+        } else {
+          switch (code) {
+            case 2: cDL++; break;
+            case 3: cDR++; break;
+            case 4: cM++; break;
+            case 5: cF++; break;
+            case 6: cG++; break;
+            case 7: cW++; break;
+            case 8: this.gfLatch = true; cGF++; break;
+            default: break;
+          }
         }
       }
       const a = this.rateAlpha;
       const nLoom = Math.max(1, this.loomLeft.length + this.loomRight.length);
       this.rateLoom += (cLoom * 1000 / nLoom - this.rateLoom) * a;
+      const nLC4 = Math.max(1, this.loomLC4.length);
+      const nLPLC2 = Math.max(1, this.loomLPLC2.length);
+      this.rateLC4 += (cLC4 * 1000 / nLC4 - this.rateLC4) * a;
+      this.rateLPLC2 += (cLPLC2 * 1000 / nLPLC2 - this.rateLPLC2) * a;
+      const nGF = Math.max(1, this.gf.length);
+      this.rateGF += (cGF * 1000 / nGF - this.rateGF) * a;
       this.rateDNaL += (cDL * 1000 / Math.max(1, this.dnaL.length) - this.rateDNaL) * a;
       this.rateDNaR += (cDR * 1000 / Math.max(1, this.dnaR.length) - this.rateDNaR) * a;
       this.rateMDN += (cM * 1000 / Math.max(1, this.mdn.length) - this.rateMDN) * a;
@@ -309,11 +401,85 @@ export class LIFSim {
       this.rateEscW += (cW * 1000 / Math.max(1, this.escw.length) - this.rateEscW) * a;
       this.ratePop += (nSpiked * 1000 / Math.max(1, n) - this.ratePop) * a;
 
+      // sampled list of "this step fired" neurons. The brain window needs
+      // only a sparse feed, so under heavy activity we stride; plasticity
+      // and rate EMAs read the full `spiked` array directly, so it does
+      // not need to be exhaustive.
       if (this.spikeBus) {
         const stride = Math.max(1, Math.floor(nSpiked / 12));   // sample under heavy activity
         for (let i = 0; i < nSpiked; i += stride) {
           spikedNow.push({ neuron: spiked[i], isGF: this.roleCode[spiked[i]] === 8 });
         }
+      }
+      // Pair-based LTP: walk every fired neuron's outgoing edges and grow
+      // those that landed on another fired neuron this step. This runs
+      // regardless of whether a SpikeBus is attached.
+      if (this.plasticEnabled) {
+        const fired = new Uint8Array(n);
+        for (let s2 = 0; s2 < nSpiked; s2++) fired[spiked[s2]] = 1;
+        const eta = this.plasticEta, alpha = this.plasticAlpha, w0 = this.plasticW0;
+        // Homeostatic decay on every nonzero edge.
+        if (alpha > 0) {
+          const decay = 1 - alpha;   // dt = 1 ms per inner-loop step
+          for (let k = 0; k < this.w.length; k++) {
+            if (this.w[k] !== 0) this.w[k] *= decay;
+          }
+        }
+        // Pair-based LTP: edges (i -> j) where both i and j fired this step
+        // grow by `eta`. Excitatory edges (w0 > 0) only; silenced (w <= 0)
+        // are skipped.
+        let touched = 0;
+        for (let s2 = 0; s2 < nSpiked; s2++) {
+          const pre = spiked[s2];
+          const end = this.rowStart[pre + 1];
+          for (let k = this.rowStart[pre]; k < end; k++) {
+            if (this.w[k] <= 0) continue;     // silence() killed it
+            const post = this.colIdx[k];
+            if (fired[post]) {
+              this.w[k] += eta;
+              touched++;
+            }
+          }
+        }
+        // Clamp to [0, 2*w0]. Inhibitory edges (w0 < 0) stay non-positive.
+        for (let k = 0; k < this.w.length; k++) {
+          const w0k = w0[k];
+          if (w0k >= 0) {
+            if (this.w[k] < 0) this.w[k] = 0;
+            else if (this.w[k] > 2 * w0k) this.w[k] = 2 * w0k;
+          } else {
+            if (this.w[k] > 0) this.w[k] = 0;
+            else if (this.w[k] < 2 * w0k) this.w[k] = 2 * w0k;
+          }
+        }
+        // Predator teach signal: extra LTD on sens -> gf edges when the
+        // fly is exposed to a predator. escapeTeach is a multiplier in
+        // [0, 1]. We apply it as a multiplicative decay on those edges
+        // at the same per-step rate as the homeostatic alpha (1e-7/step),
+        // scaled by teach * 1000 so 30 s of full exposure shifts the
+        // sens->gf edges by a few percent (within the 50% floor the
+        // plasticity probe checks). Spec: fly-predator-zones "Predator
+        // exposure teaches escape".
+        if (this.escapeTeach > 0 && this.sens && this.sens.length && this.gf && this.gf.length) {
+          const teach = this.escapeTeach;
+          // Per-step shrink on sens->gf edges: w *= (1 - alpha * 100 * teach).
+          // This is roughly 100x faster than homeostatic decay at teach=1,
+          // i.e. ~3% over 30 s with default alpha=1e-7. Tune via the test,
+          // not by guess.
+          const shrink = 1 - this.plasticAlpha * 100 * teach;
+          const gfSet = new Set(this.gf);
+          for (let i = 0; i < this.sens.length; i++) {
+            const pre = this.sens[i];
+            const end = this.rowStart[pre + 1];
+            for (let k = this.rowStart[pre]; k < end; k++) {
+              if (gfSet.has(this.colIdx[k]) && this.w[k] > 0) {
+                this.w[k] *= shrink;
+              }
+            }
+          }
+        }
+        this.plasticEdgesTouched += touched;
+        this.plasticLastMs = this.simMs;
       }
     }
     if (this.spikeBus) this.spikeBus.push(spikedNow);

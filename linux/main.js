@@ -18,10 +18,11 @@
 
 import { app, BrowserWindow, Tray, Menu, screen, ipcMain, nativeImage, powerMonitor } from 'electron';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-import { existsSync } from 'node:fs';
+import { dirname, resolve, join } from 'node:path';
+import { existsSync, promises as fsp, unlinkSync } from 'node:fs';
 import { sense } from './src/os.js';
 import { loadBrainData } from './src/data.js';
+import { loadConfig as loadBrainStatsConfig } from './src/brain-stats-config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -65,6 +66,21 @@ const cfgWalkSpeed  = numFlag('walk-speed',  'FLY_WALK_SPEED',  1.0);
 const cfgEscapeRate = numFlag('escape-rate', 'FLY_ESCAPE_RATE', 1.0);
 const cfgIdleMs     = numFlag('idle-ms',     'FLY_IDLE_MS',     90_000);
 
+// Hebbian plasticity toggles. plasticity=on enables LTP/LTD updates on every
+// sim step; the rates are the canonical erojasoficial fly-brain defaults
+// (eta=1e-4 LTP, alpha=1e-7 homeostatic decay). Persisted weights are loaded
+// from app.getPath('userData')/weights.json on startup if present, and saved
+// every PLASTIC_SAVE_MS (or on quit).
+const cfgPlasticity  = argValue('plasticity') || process.env.FLY_PLASTICITY || 'off';
+const cfgPlasticEta  = numFlag('plasticity-eta',  'FLY_PLASTIC_ETA',  1e-4);
+const cfgPlasticAlpha = numFlag('plasticity-alpha', 'FLY_PLASTIC_ALPHA', 1e-7);
+
+// Phase A: fly appearance overrides. fly-theme is a name from FLY_THEMES
+// (orange, cyan, magenta, yellow, green, fruitfly). fly-size is a multiplier
+// on the body scale; clamped to [0.3, 5.0] in flymodel.setScale.
+const cfgFlyTheme = (argValue('fly-theme') || process.env.FLY_THEME || 'orange').toLowerCase();
+const cfgFlySize  = numFlag('fly-size', 'FLY_SIZE', 1.0);
+
 // ----- Pure helpers (exported for tests) -----
 
 /**
@@ -92,28 +108,93 @@ export function planOverlays(allDisplays, activeDisplayId) {
  *   onAddFly: () => void,
  *   onRemoveFly: () => void,
  *   onScare: () => void,
+ *   onTrainer: (target: string, dir: 1 | -1) => void,
+ *   onPlasticity: (action: 'enable' | 'disable' | 'reset') => void,
+ *   onSpawnSugar: () => void,
+ *   onSpawnNear: () => void,
+ *   onSpawnPredator: () => void,
+ *   onSpawnMate: () => void,
+ *   onClearZones: () => void,
+ *   onSetTheme: (name: string) => void,
+ *   onSetSize: (size: number) => void,
+ *   onToggleTrainer: () => void,
+ *   onToggleStats: () => void,
  *   onQuit: () => void,
  *   activeDisplayId: number,
  *   displayCount: number,
  *   paused: boolean,
  *   brainVisible: boolean,
+ *   trainerVisible: boolean,
+ *   statsVisible: boolean,
+ *   currentTheme: string,
+ *   currentSize: number,
  * }} ctx
  */
 export function buildTrayMenu(ctx) {
+  // Theme options — must match FLY_THEMES keys in flymodel.js.
+  const themeNames = ['orange', 'fruitfly', 'cyan', 'magenta', 'yellow', 'green'];
+  const sizeOptions = [0.5, 1.0, 1.5, 2.0, 3.0];
   return Menu.buildFromTemplate([
     { label: 'DesktopFly (Linux)', enabled: false },
     { type: 'separator' },
     { label: ctx.paused ? 'Resume' : 'Pause', click: ctx.onTogglePause },
     { label: ctx.brainVisible ? 'Hide Brain' : 'Show Brain', click: ctx.onToggleBrain },
     {
+      label: 'Brain',
+      submenu: [
+        { label: ctx.trainerVisible ? 'Hide Trainer' : 'Open Trainer', click: ctx.onToggleTrainer },
+        { label: ctx.statsVisible ? 'Hide Stats' : 'Show Stats', click: ctx.onToggleStats },
+      ],
+    },
+    {
       label: 'Send Fly to Next Display',
       visible: ctx.displayCount > 1,
       click: ctx.onMove,
     },
     { type: 'separator' },
+    {
+      label: 'Theme',
+      submenu: themeNames.map((n) => ({
+        label: n.charAt(0).toUpperCase() + n.slice(1) + (n === ctx.currentTheme ? '  ✓' : ''),
+        click: () => ctx.onSetTheme(n),
+      })),
+    },
+    {
+      label: 'Size',
+      submenu: sizeOptions.map((s) => ({
+        label: s + 'x' + (Math.abs(s - ctx.currentSize) < 0.01 ? '  ✓' : ''),
+        click: () => ctx.onSetSize(s),
+      })),
+    },
+    { type: 'separator' },
+    {
+      label: 'Game',
+      submenu: [
+        { label: 'Spawn Sugar Zone', click: ctx.onSpawnSugar },
+        { label: 'Spawn Near Fly',    click: ctx.onSpawnNear },
+        { label: 'Spawn Predator',   click: ctx.onSpawnPredator },
+        { label: 'Spawn Mate',       click: ctx.onSpawnMate },
+        { label: 'Clear Zones',      click: ctx.onClearZones },
+      ],
+    },
+    { type: 'separator' },
     { label: 'Add Fly', click: ctx.onAddFly },
     { label: 'Remove Fly', click: ctx.onRemoveFly },
     { label: 'Scare Flies', click: ctx.onScare },
+    {
+      label: 'Trainer',
+      submenu: [
+        { label: 'Reward walk (DNp09)',  click: () => ctx.onTrainer('walk', +1) },
+        { label: 'Reward groom (DNg11)', click: () => ctx.onTrainer('groom', +1) },
+        { label: 'Punish escape (GF)',   click: () => ctx.onTrainer('escape', -1) },
+        { label: 'Punish backward (MDN)', click: () => ctx.onTrainer('backward', -1) },
+        { type: 'separator' },
+        { label: 'Enable Hebbian plasticity',
+          click: () => ctx.onPlasticity('enable') },
+        { label: 'Disable plasticity',  click: () => ctx.onPlasticity('disable') },
+        { label: 'Reset weights',       click: () => ctx.onPlasticity('reset') },
+      ],
+    },
     { type: 'separator' },
     { label: 'Quit', click: ctx.onQuit },
   ]);
@@ -145,7 +226,43 @@ export function createOverlayWindow(display, linuxDir, hidden) {
       sandbox: false,            // preload.mjs is ESM; sandbox:true strips it
     },
   });
-  win.loadFile(resolve(linuxDir, 'renderer/overlay.html'));
+  // The renderer assets live in windows/renderer/ — that directory is the
+  // single source of truth, the linux/ tree is a thin main-process wrapper
+  // around it.  linux/renderer/ is a per-machine scratchpad (overlay.html
+  // there is not git-tracked), so we must NOT use resolve(linuxDir, ...).
+  const rendererDir = resolve(linuxDir, '..', 'windows', 'renderer');
+  win.loadFile(resolve(rendererDir, 'overlay.html'));
+  // Phase A: apply the requested theme + size before the first frame paints
+  // so the user never sees the default orange/1.0 flash. We send a single
+  // `boot-config` payload FIRST; the renderer awaits it before addFly()
+  // so the very first Fly is created with the right scale + theme (no
+  // visible jump from the default FLY_SCALE to cfgFlySize on frame 1).
+  // The setTheme / setSize cmds below then re-apply (idempotently) to
+  // every live Fly — including any added later via the tray.
+  win.webContents.once('did-finish-load', () => {
+    if (win.isDestroyed()) return;
+    win.webContents.send('boot-config', { theme: cfgFlyTheme, size: cfgFlySize });
+    win.webContents.send('cmd', { name: 'setTheme', theme: cfgFlyTheme });
+    win.webContents.send('cmd', { name: 'setSize', size: cfgFlySize });
+  });
+  // Pipe renderer console so we can debug the overlay from the terminal
+  // without opening DevTools. The renderer forwards all console.* through
+  // the flyAPI.sendLog IPC channel and the preload exposes it.
+  // Electron 32+ uses an object payload; the (level, msg, line, src)
+  // form is pre-32. Handle both so we get the breadcrumb either way.
+  win.webContents.on('console-message', (...args) => {
+    let level, msg, line, src;
+    if (args.length >= 4 && typeof args[1] === 'number') {
+      [level, msg, line, src] = args.slice(1);
+    } else {
+      ({ level, message: msg, lineNumber: line, sourceId: src } = args[1] || {});
+    }
+    const tag = ['V', 'I', 'W', 'E'][level] || '?';
+    process.stderr.write(`[overlay ${tag}] ${msg}  (${src}:${line})\n`);
+  });
+  win.webContents.on('render-process-gone', (_e, d) => {
+    process.stderr.write(`[overlay GONE] reason=${d.reason} exitCode=${d.exitCode}\n`);
+  });
   win.once('ready-to-show', () => {
     win.setIgnoreMouseEvents(true, { forward: true });
     if (!hidden) win.show();
@@ -160,6 +277,10 @@ let brainWindow = null;      // separate 340x300 panel that shows spike flashes
 let activeDisplayId = null;
 let paused = false;
 let brainVisible = true;
+// Phase A: runtime-mutable fly appearance. Initialized from CLI/env so the
+// first frame already has the right look; the tray mutates these on click.
+let currentTheme = cfgFlyTheme;
+let currentSize  = cfgFlySize;
 
 /**
  * The brain panel. Same shape as windows/main.js#createBrain: 340x300, top-right
@@ -170,6 +291,9 @@ let brainVisible = true;
  * @param {string} linuxDir
  */
 export function createBrainWindow(primary, linuxDir) {
+  // The original brain window size. The bar charts and the
+  // stats panel live in the trainer window (see createTrainer
+  // below) so the brain window is back to the original square.
   const W = 340, H = 300;
   const win = new BrowserWindow({
     x: primary.workArea.x + primary.workArea.width - W - 18,
@@ -197,18 +321,135 @@ export function createBrainWindow(primary, linuxDir) {
   return win;
 }
 
+// Phase B: brain-trainer window — optogenetic lesson player. Same shape as
+// the brain window (small, top-right, hideable) but with its own title and
+// page. Uses the same preload so api.getBrainData and api.stimulate just
+// work over the same IPC channels.
+let trainerWindow = null;
+let trainerVisible = false;
+export function createTrainerWindow(primary, linuxDir) {
+  const W = 540, H = 420;
+  const win = new BrowserWindow({
+    x: primary.workArea.x + primary.workArea.width - W - 18,
+    y: primary.workArea.y + primary.workArea.height - H - 18,
+    width: W,
+    height: H,
+    title: 'Brain Trainer — optogenetic lessons',
+    backgroundColor: '#0c0f15',
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    show: false,
+    webPreferences: {
+      preload: resolve(linuxDir, 'preload.mjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  win.setMenu(null);
+  win.on('close', (e) => {
+    if (!app.isQuitting) { e.preventDefault(); win.hide(); trainerVisible = false; refreshTray(); }
+  });
+  // brain-trainer.html lives in windows/renderer/ (the symlinked source of
+  // truth). Same path as the brain window uses.
+  win.loadFile(resolve(linuxDir, '..', 'windows', 'renderer', 'brain-trainer.html'));
+  win.once('ready-to-show', () => { if (trainerVisible) win.show(); });
+  return win;
+}
+function toggleTrainer() {
+  if (!trainerWindow || trainerWindow.isDestroyed()) {
+    trainerWindow = createTrainerWindow(screen.getPrimaryDisplay(), __dirname);
+    trainerVisible = true;
+    trainerWindow.once('ready-to-show', () => trainerWindow.show());
+  } else if (trainerWindow.isVisible()) {
+    trainerWindow.hide(); trainerVisible = false;
+  } else {
+    trainerWindow.show();   trainerVisible = true;
+  }
+  refreshTray();
+}
+
+// Phase C: Brain Stats window — bar-chart panel for the 9 command
+// populations. The renderer reads brain-stats.json via the
+// `brain-stats:read` IPC channel and consumes the same `state` IPC
+// stream that drives the brain window's state line. Window size
+// matches the brain window so all three "Fly Wire" windows look
+// like siblings.
+let statsWindow = null;
+let statsVisible = false;
+export function createStatsWindow(primary, linuxDir) {
+  const W = 360, H = 300;
+  // Stack the stats window above the brain window in the bottom-right
+  // corner. The brain window is `BRAIN_H` tall with `PAD` margin, so
+  // we shift up by that amount + a small gap. The constants are
+  // named so future window-size changes update the layout in one place.
+  const BRAIN_H = 300;
+  const PAD = 18;
+  const GAP = 2;
+  const win = new BrowserWindow({
+    x: primary.workArea.x + primary.workArea.width - W - PAD,
+    y: primary.workArea.y + primary.workArea.height - H - PAD - (BRAIN_H + PAD + GAP),
+    width: W,
+    height: H,
+    title: 'Brain Stats — population activity',
+    backgroundColor: '#0c0f15',
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    show: false,
+    webPreferences: {
+      preload: resolve(linuxDir, 'preload.mjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  win.setMenu(null);
+  win.on('close', (e) => {
+    if (!app.isQuitting) { e.preventDefault(); win.hide(); statsVisible = false; refreshTray(); }
+  });
+  win.loadFile(resolve(linuxDir, '..', 'windows', 'renderer', 'brain-stats.html'));
+  win.once('ready-to-show', () => { if (statsVisible) win.show(); });
+  return win;
+}
+function toggleStats() {
+  if (!statsWindow || statsWindow.isDestroyed()) {
+    statsWindow = createStatsWindow(screen.getPrimaryDisplay(), __dirname);
+    statsVisible = true;
+    statsWindow.once('ready-to-show', () => statsWindow.show());
+  } else if (statsWindow.isVisible()) {
+    statsWindow.hide(); statsVisible = false;
+  } else {
+    statsWindow.show();   statsVisible = true;
+  }
+  refreshTray();
+}
+
 // ----- IPC bridge: the renderer (windows/renderer/overlay.js, symlinked)
 // expects 8 channels. Without them, its async IIFE rejects on
 // `api.getBrainData()` and the scene stays empty (white PNG).
 let brainData = null;       // FlyWire data; null on disk-miss → legacy fly
 const idleSinceMs = () => powerMonitor.getSystemIdleTime() * 1000;
+
+// Each overlay is a per-monitor BrowserWindow whose render scene is centered
+// on that monitor. To get the cursor into the same scene space, subtract the
+// monitor center and flip Y (overlay.js uses +Y up). Done per window so the
+// active display's render sees its own coords and inactive displays still
+// get a value (their fly is hidden but the math stays consistent if shown).
+function cursorInScene(windowBounds) {
+  const c = screen.getCursorScreenPoint();
+  return {
+    x: c.x - (windowBounds.x + windowBounds.width / 2),
+    y: (windowBounds.y + windowBounds.height / 2) - c.y,
+  };
+}
+
 function pushAmbientToAll() {
   // The renderer uses ambient for: mouse pos, typing-level, sleep, tempo, activity.
   // Linux gives us system-idle time; we proxy it as typingLevel=0, sleepy=after idleMs.
   const idle = idleSinceMs();
   const sleepy = idle > cfgIdleMs;
-  const ambient = {
-    mouse: { x: 0, y: 0 },            // TODO: track real cursor (xdotool getmouselocation)
+  // Window-level fields that don't depend on the per-display transform.
+  const baseFields = {
     typing: 0,                        // TODO: hook xkb / libinput key events
     sleepy,
     // tempo carries the user-controllable activity multiplier (default 1.0);
@@ -218,25 +459,33 @@ function pushAmbientToAll() {
     escapeRateMul: cfgEscapeRate,
     idleMs: cfgIdleMs,
   };
-  for (const win of windows.values()) win.webContents.send('ambient', ambient);
+  for (const [id, win] of windows) {
+    if (win.isDestroyed()) continue;
+    const ambient = { ...baseFields, mouse: cursorInScene(win.getBounds()) };
+    win.webContents.send('ambient', ambient);
+  }
 }
 setInterval(pushAmbientToAll, 500);
 
 function pushRetargetToAll() {
-  // The renderer uses retarget to size the ortho camera to the active display
-  // and to know screen rectangles (for fly initial placement).
-  const primary = screen.getPrimaryDisplay();
-  const size = {
-    width: primary.bounds.width,
-    height: primary.bounds.height,
-    screens: screen.getAllDisplays().map(d => ({
-      id: d.id,
-      x0: d.bounds.x, y0: d.bounds.y,
-      x1: d.bounds.x + d.bounds.width,
-      y1: d.bounds.y + d.bounds.height,
-    })),
-  };
-  for (const win of windows.values()) win.webContents.send('retarget', size);
+  // The renderer uses retarget to size the ortho camera to *its own* display
+  // and to know screen rectangles (for fly initial placement). Sending a
+  // single primary.bounds size to every per-monitor overlay made the canvas
+  // the wrong shape on every non-primary display — squashed, off-centre, or
+  // stretched — and on a one-monitor box it just happened to look right
+  // because primary was the only one. Each window now gets its own bounds.
+  const allDisplays = screen.getAllDisplays();
+  const screens = allDisplays.map(d => ({
+    id: d.id,
+    x0: d.bounds.x, y0: d.bounds.y,
+    x1: d.bounds.x + d.bounds.width,
+    y1: d.bounds.y + d.bounds.height,
+  }));
+  for (const [id, win] of windows) {
+    if (win.isDestroyed()) continue;
+    const b = win.getBounds();
+    win.webContents.send('retarget', { width: b.width, height: b.height, screens });
+  }
 }
 
 ipcMain.handle('brain-data', () => brainData);
@@ -247,12 +496,108 @@ ipcMain.on('spikes', (_e, list) => {
     brainWindow.webContents.send('spikes', list);
   }
 });
+// Brain state readout (throttled to 10 Hz by the renderer). The brain
+// window subscribes via preload.mjs#onState and renders the line.
+// The Brain Stats window subscribes to the same channel and uses the
+// `tag` to drive its per-population bar chart. Spec: brain-state-readout
+// and openspec/changes/fly-neuron-activity-bars.
+ipcMain.on('state', (_e, payload) => {
+  if (brainWindow && !brainWindow.isDestroyed() && payload) {
+    brainWindow.webContents.send('state', payload);
+  }
+  if (statsWindow && !statsWindow.isDestroyed() && payload) {
+    statsWindow.webContents.send('state', payload);
+  }
+});
 // Brain window's click-to-stimulate -> forward to the overlay (the only one
 // with the sim) so the user gets the same effect as Windows.
 ipcMain.on('stimulate', (_e, req) => {
   for (const w of windows.values()) {
     if (!w.isDestroyed()) w.webContents.send('stimulate', req);
   }
+});
+
+// Hebbian food-memories persistence. userData on Linux lives under
+// ~/.config/<appname>/ so a `rm -rf ~/.config/desktop-fly` is the
+// nuclear option. (fs/path imports are at the top of the file with
+// the rest — ESM forbids redeclaration.)
+const memoriesFile = () => join(app.getPath('userData'), 'food-memories.json');
+// Phase B: per-lesson JSON files under userData/lessons/<name>.json.
+// Same pattern as memoriesFile but per-lesson instead of one big blob.
+const lessonsDir  = () => join(app.getPath('userData'), 'lessons');
+const lessonFile  = (name) => join(lessonsDir(), `${name}.json`);
+// fly-neuron-activity-bars: the Brain Stats window's config. Same
+// pattern as memoriesFile/lessonFile — read on demand by the
+// renderer, with built-in fallback to defaults on missing/malformed
+// JSON (see brain-stats.js#loadConfig).
+const brainStatsFile = () => join(app.getPath('userData'), 'brain-stats.json');
+
+ipcMain.handle('memories:load', async () => {
+  try { return JSON.parse(await fsp.readFile(memoriesFile(), 'utf8')); }
+  catch { return null; }
+});
+ipcMain.on('memories:save', async (_e, payload) => {
+  if (!payload || !Array.isArray(payload.weights)) return;
+  try {
+    await fsp.writeFile(memoriesFile(), JSON.stringify({
+      version: 1, savedAt: new Date().toISOString(),
+      weights: payload.weights, edgesTouched: payload.edgesTouched ?? 0,
+    }));
+  } catch (err) { console.warn('memories:save failed:', err); }
+});
+ipcMain.on('memories:clear', () => {
+  try { if (existsSync(memoriesFile())) unlinkSync(memoriesFile()); }
+  catch (err) { console.warn('memories:clear failed:', err); }
+});
+
+// Phase B: brain-trainer lesson save/load. Returns the saved file path
+// string on success, null on failure (the renderer surfaces it in the log).
+ipcMain.handle('lessons:save', async (_e, { name, data }) => {
+  if (typeof name !== 'string' || !name) return null;
+  if (typeof data !== 'string') return null;
+  // basic safety: only [a-z0-9._-], prevent path traversal
+  if (!/^[a-z0-9._-]+$/i.test(name)) return null;
+  try {
+    await fsp.mkdir(lessonsDir(), { recursive: true });
+    await fsp.writeFile(lessonFile(name), data, 'utf8');
+    return lessonFile(name);
+  } catch (err) { console.warn('lessons:save failed:', err); return null; }
+});
+
+ipcMain.handle('lessons:load', async (_e, name) => {
+  if (typeof name !== 'string' || !name) return null;
+  if (!/^[a-z0-9._-]+$/i.test(name)) return null;
+  try { return await fsp.readFile(lessonFile(name), 'utf8'); }
+  catch { return null; }
+});
+
+// fly-neuron-activity-bars: returns the Brain Stats config. The
+// renderer is the consumer; the main process only persists the
+// file (the user edits it by hand). The renderer's `loadConfig`
+// (windows/src/brain-stats.js) handles the missing/malformed case
+// with the same defaults as the main process — we just call it
+// here so the contract is one source of truth.
+ipcMain.handle('brain-stats:read', () => loadBrainStatsConfig(brainStatsFile()));
+
+// Forward every renderer console.{log,info,warn,error} to main stderr.
+// Used to debug the overlay without opening DevTools (X11+electron: DevTools
+// is a manual step we don't want to ask the user to repeat).
+ipcMain.on('renderer-log', (_e, { level, args }) => {
+  try {
+    const text = (args || []).map(a => {
+      if (typeof a === 'string') return a;
+      try { return JSON.stringify(a); } catch (_) { return String(a); }
+    }).join(' ');
+    process.stderr.write(`[renderer ${level}] ${text}\n`);
+  } catch (err) {
+    process.stderr.write(`[renderer log-forward fail] ${err.message}\n`);
+  }
+});
+
+// Boot probe: overlay.html/overlay.js ping this at every key checkpoint so
+// we get a breadcrumb trail even when console-message is silent.
+ipcMain.on('boot-probe', (_e, msg) => {
+  process.stderr.write(`[boot] ${msg}\n`);
 });
 
 async function run() {
@@ -345,11 +690,42 @@ function refreshTray() {
     onAddFly: () => broadcastCmd({ name: 'addFly' }),
     onRemoveFly: () => broadcastCmd({ name: 'removeFly' }),
     onScare: () => broadcastCmd({ name: 'scareAll' }),
+    onTrainer: (target, dir) => broadcastCmd({ name: dir > 0 ? 'reward' : 'punish', target }),
+    onPlasticity: (action) => {
+      if (action === 'enable') {
+        broadcastCmd({ name: 'enablePlasticity', eta: cfgPlasticEta, alpha: cfgPlasticAlpha });
+      } else if (action === 'disable') {
+        broadcastCmd({ name: 'disablePlasticity' });
+      } else if (action === 'reset') {
+        broadcastCmd({ name: 'resetTraining' });
+      }
+    },
+    onSpawnSugar: () => broadcastCmd({ name: 'spawnSugar' }),
+    onSpawnNear: () => broadcastCmd({ name: 'spawnNear' }),
+    onSpawnPredator: () => broadcastCmd({ name: 'spawnPredator' }),
+    onSpawnMate: () => broadcastCmd({ name: 'spawnMate' }),
+    onClearZones: () => broadcastCmd({ name: 'clearZones' }),
+    onSetTheme: (name) => {
+      currentTheme = name;
+      broadcastCmd({ name: 'setTheme', theme: name });
+      refreshTray();
+    },
+    onSetSize: (size) => {
+      currentSize = size;
+      broadcastCmd({ name: 'setSize', size });
+      refreshTray();
+    },
+    onToggleTrainer: toggleTrainer,
+    onToggleStats: toggleStats,
     onQuit: () => { app.isQuitting = true; app.quit(); },
     activeDisplayId,
     displayCount: allDisplays.length,
     paused,
     brainVisible,
+    trainerVisible,
+    statsVisible,
+    currentTheme,
+    currentSize,
   }));
 }
 
@@ -393,8 +769,16 @@ async function runSnapshot(outPath) {
     width: 720, height: 720,
   });
   // Pipe renderer console so we see the IIFE failure path.
-  win.webContents.on('console-message', (_e, level, msg) => {
-    console.log(`[renderer] ${msg}`);
+  // Electron 32+ uses an object payload; the (level, msg) form is
+  // pre-32. Handle both so we get the breadcrumb either way.
+  win.webContents.on('console-message', (...args) => {
+    let level, msg, line, src;
+    if (args.length >= 4 && typeof args[1] === 'number') {
+      [level, msg, line, src] = args.slice(1);
+    } else {
+      ({ level, message: msg, lineNumber: line, sourceId: src } = args[1] || {});
+    }
+    console.log(`[renderer ${level}] ${msg}  (${src}:${line})`);
   });
   win.webContents.on('render-process-gone', (_e, d) => {
     console.error('[renderer] gone:', d);
@@ -406,12 +790,25 @@ async function runSnapshot(outPath) {
       console.warn('[desktop-fly] no data/ for snapshot:', e.message);
     }
   }
-  await win.loadFile(resolve(__dirname, 'renderer/overlay.html'));
+  await win.loadFile(resolve(__dirname, '..', 'windows', 'renderer', 'overlay.html'));
   // Send a retarget with the window size so the ortho camera fits.
   win.webContents.send('retarget', {
     width: 720, height: 720,
     screens: [{ id: 0, x0: 0, y0: 0, x1: 720, y1: 720 }],
   });
+  // boot-config unblocks the overlay's addFly() gate (see
+  // overlay.js — addFly is deferred until this event arrives, so the
+  // first Fly is built with the right scale + theme, no jump on
+  // frame 1). Snapshot path must send it too — otherwise the renderer
+  // waits forever and the snapshot is a blank canvas.
+  win.webContents.send('boot-config', { theme: cfgFlyTheme, size: cfgFlySize });
+  // Phase A: re-apply (idempotently) via the same cmd channel the
+  // interactive path uses, so any future flies added by `addFly` tray
+  // calls during a long-running session pick up the same look. 800 ms
+  // sleep below gives the renderer time to consume these and to run
+  // a few sim steps before we capture.
+  win.webContents.send('cmd', { name: 'setTheme', theme: cfgFlyTheme });
+  win.webContents.send('cmd', { name: 'setSize', size: cfgFlySize });
   // Wait for the renderer's first paint AND give addFly() a few frames to land.
   await new Promise(r => setTimeout(r, 800));
   const img = await win.webContents.capturePage();
@@ -421,6 +818,11 @@ async function runSnapshot(outPath) {
 }
 
 async function runBrainshot(outPath) {
+  // The brainshot is a debugging/CI path used to verify the brain window
+  // renders correctly without spinning up a desktop session. It must
+  // match the live brain window dimensions (340x300; see createBrainWindow)
+  // so the camera/centering math in brain.js sees the same viewport it
+  // will see in the real app.
   const win = new BrowserWindow({
     show: false,
     paintWhenInitiallyHidden: true,
@@ -430,10 +832,36 @@ async function runBrainshot(outPath) {
       preload: resolve(__dirname, 'preload.mjs'),
       sandbox: false,
     },
-    width: 720, height: 560,
+    width: 340, height: 300,
   });
+  // Pipe renderer console so we see the IIFE failure path.
+  // Electron 32+ uses an object payload; the (level, msg) form is
+  // pre-32. Handle both so we get the breadcrumb either way.
+  win.webContents.on('console-message', (...args) => {
+    let level, msg, line, src;
+    if (args.length >= 4 && typeof args[1] === 'number') {
+      [level, msg, line, src] = args.slice(1);
+    } else {
+      ({ level, message: msg, lineNumber: line, sourceId: src } = args[1] || {});
+    }
+    console.log(`[brainshot ${level}] ${msg}  (${src}:${line})`);
+  });
+  // brainData is normally loaded in run() (the interactive path). The
+  // brainshot CLI branch never runs that, so load on demand here too —
+  // otherwise the renderer's getBrainData() returns null and brain.js
+  // bails before building the point clouds.
+  if (!brainData) {
+    try { brainData = loadBrainData(); } catch (e) {
+      console.warn('[desktop-fly] no data/ for brainshot:', e.message);
+    }
+  }
   await win.loadFile(resolve(__dirname, 'renderer/brain.html'));
-  await new Promise(r => win.webContents.once('paint', r));
+  // brain.js's IIFE does `await api.getBrainData()` and then calls build(),
+  // which adds the point clouds and computes the camera distance. The
+  // first 'paint' event fires before the IPC reply arrives, so a single
+  // paint-await captures the empty scene. Sleep long enough for the
+  // fetch + build + at least one rendered frame.
+  await new Promise(r => setTimeout(r, 1500));
   const img = await win.webContents.capturePage();
   await savePng(img, outPath);
   win.close();

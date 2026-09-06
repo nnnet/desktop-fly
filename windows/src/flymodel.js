@@ -19,7 +19,11 @@ import { rnd, clampf, angleDiff, smoothstep, lag, TUNED_HZ } from './util.js';
 import { makeSignals } from './sim.js';
 
 export const SHADOWS_ENABLED = true;
-export const FLY_SCALE = 5.0;    // large enough to see at 1920x1080
+export const FLY_SCALE = 5.0;    // ROLLBACK: 14.0 made the fly invisible; restore 5.0 first.
+// Runtime-mutable scale (let) so the tray/CLI can change fly size without
+// restarting. Existing Fly nodes re-apply via the swapBody path on every
+// `setScale`; the const above is just the initial value.
+export let flyScaleCurrent = FLY_SCALE;
 export const EDGE_MARGIN = 50;
 
 // MARK: - Theme
@@ -48,14 +52,96 @@ export const FLY_THEMES = {
     wingFleck: 0xfff2a0,             // pale gold wingtip
     leg:    0x1a1a1a,
   },
+  cyan: {
+    body:    0x00b4d8,               // cyan thorax
+    head:    0x48cae4,
+    eye:     0x101820,
+    abdomen: 0x0096c7,
+    wingVein: 0x222222,
+    wingFleck: 0xe0fbff,
+    leg:     0x0a1a20,
+  },
+  magenta: {
+    body:    0xc71585,               // magenta thorax
+    head:    0xe040a0,
+    eye:     0x101010,
+    abdomen: 0xa0126a,
+    wingVein: 0x222222,
+    wingFleck: 0xffd6f5,
+    leg:     0x180a14,
+  },
+  yellow: {
+    body:    0xffd700,               // bright yellow
+    head:    0xfff080,
+    eye:     0x202020,
+    abdomen: 0xe6c200,
+    wingVein: 0x222222,
+    wingFleck: 0xfffce0,
+    leg:     0x1a1a1a,
+  },
+  green: {
+    body:    0x2cb42c,               // saturated green
+    head:    0x60d060,
+    eye:     0x101810,
+    abdomen: 0x229922,
+    wingVein: 0x222222,
+    wingFleck: 0xe0ffe0,
+    leg:     0x0a180a,
+  },
 };
 export let FLY_THEME = FLY_THEMES.orange;   // current theme (let — swappable)
+
+// MARK: - Runtime mutators (Phase A: configurability)
+//
+// These mutate the global theme/scale so the tray/CLI can change the fly at
+// runtime. The renderer is expected to re-apply them to any existing Fly
+// instances (e.g. via swapBody) after calling these; the renderer is also
+// responsible for reading the new values back when building a fresh body.
+
+// Available theme names — used by CLI parser and tray submenu.
+export const FLY_THEME_NAMES = Object.keys(FLY_THEMES);
+
+// setTheme(name): switch the active theme. Returns true on success, false if
+// name is unknown (CLI/tray should validate before calling).
+export function setTheme(name) {
+  if (!Object.prototype.hasOwnProperty.call(FLY_THEMES, name)) return false;
+  FLY_THEME = FLY_THEMES[name];
+  return true;
+}
+
+// setScale(v): change the body scale at runtime. The argument is a
+// MULTIPLIER on the base FLY_SCALE (= 5.0 scene units), not the absolute
+// scale. The CLI/tray advertise "0.5x, 1x, 1.5x, 2x, 3x" so the user
+// expects 1.0 to be the default and 0.5 to be half-size. Clamp the
+// multiplier to [0.3, 5.0] to keep the fly on screen and to avoid the
+// original FLY_SCALE=14.0 invisibility bug. The renderer is expected to
+// walk all Fly nodes and re-set `node.scale.set(flyScaleCurrent, ...)`
+// via applyScale().
+export function setScale(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return false;
+  const mult = Math.max(0.3, Math.min(5.0, n));
+  flyScaleCurrent = FLY_SCALE * mult;
+  return mult;
+}
 // How close the fly's centre may get to the edge of the desktop while walking.
 // The body is ~30 px tall at FLY_SCALE, so the macOS value of 20 let the head
 // slide under the screen edge; this keeps the whole body on screen.
 export const EDGE_CLAMP = 45;
 export const SCARE_RADIUS = 110;     // legacy behavior (non-connectome flies) only
 export const NERVOUS_RADIUS = 240;   // legacy behavior only
+
+// Satiety: hunger decay time constant (s) and threshold below which the fly
+// ignores food. Spec: fly-satiety.
+export const SUGAR_TAU = 60;
+export const SUGAR_THRESHOLD = 0.2;
+// EAT_DUR / COURT_DUR: how long the brain state line shows 'eat' / 'court'
+// after a zone-consume / mate-close event. 0.4 s matches the stateAge
+// dwell guard used elsewhere.
+export const EAT_DUR = 0.4;
+export const COURT_DUR = 0.4;
+// Reward per sugar consumption; clamped at 1 in Fly.eatSugar.
+export const SUGAR_REWARD = 0.4;
 
 // User-tunable multiplier on the spontaneous-takeoff rate. Default 1.0 leaves
 // the connectome-driven escape chance untouched (Windows / macOS / default
@@ -205,7 +291,10 @@ function wingMesh() {
 
 export function buildFlyModel() {
   const root = new THREE.Object3D();
-  root.scale.set(FLY_SCALE, FLY_SCALE, FLY_SCALE);
+  // root.scale is the user-facing "size" knob. buildFlyModel constructs the
+  // body at identity scale; the Fly constructor sets `this.node.scale`
+  // (= root.scale) to flyScaleCurrent so the first frame already has the
+  // right size and there's no scale-jump on the first applyScale().
 
   // Theme helper: every body material pulls its colour from FLY_THEME so
   // swapping themes is a single assignment. `t('body')` is the thorax base;
@@ -339,6 +428,7 @@ export class Fly {
     this.stateAge = 0;
     this.terrain = [];      // walkable window edges, set by the coordinator
     this.ledge = null;      // currently attached window edge
+    this.zones = [];        // food / mate zones, set by the coordinator
     // Scene-space rects of the real displays. The overlay spans the whole
     // virtual desktop, which on a multi-monitor layout is not a solid
     // rectangle — these keep the fly out of the dead corners between screens.
@@ -357,6 +447,28 @@ export class Fly {
     this.brainLive = false;
     this.liveArousal = 0;
     this.liveWing = 0;
+
+    // Satiety: per-fly hunger. 0 = starving, 1 = full. Decays toward 0
+    // with tau=60s. Eating a sugar zone adds 0.4 (clamped). Below
+    // SUGAR_THRESHOLD the renderer zeros the effective foodAttract.
+    // Spec: fly-satiety (5 Requirements). The initial value MUST be
+    // strictly above SUGAR_THRESHOLD (= 0.2) so a fresh fly is
+    // actually hungry in its first second — sugarLevel=0.2 decays
+    // below 0.2 in one frame and the gate then zeroes foodAttract
+    // for the rest of the session. Use 1.0 (full demo: fly hunts
+    // sugar until it eats a few zones, then gets satiated and
+    // goes hungry again as the level decays).
+    this.sugarLevel = 1.0;
+    // Transient behaviour tags (eaten / courted). Set by the renderer when
+    // attract reports foodReached / mateClose. Cleared after EAT_DUR /
+    // COURT_DUR seconds — the brain state line in the brain window
+    // reports these while they are set.
+    this.eatingTimer = 0;
+    this.courtingTimer = 0;
+    // Predator teach signal: this frame's contribution to the Hebbian LTD on
+    // sens->escape edges. 0 if no predator nearby; peaks at 1 if right on
+    // top of one. The renderer multiplies it into the plasticity step.
+    this.escapeTeach = 0;
 
     this.syncNode();
   }
@@ -446,7 +558,7 @@ export class Fly {
     this.speed = 0;
     this.alt = 0;
     this.pitch = 0;
-    this.node.scale.set(FLY_SCALE, FLY_SCALE, FLY_SCALE);
+    this.node.scale.set(flyScaleCurrent, flyScaleCurrent, flyScaleCurrent);
     this.node.position.z = 0;
     // refold the wings flat over the abdomen
     this.model.foldedWings.children.forEach((wing, i) => {
@@ -455,6 +567,25 @@ export class Fly {
     });
     this.model.blurWingL.visible = false;
     this.model.blurWingR.visible = false;
+  }
+
+  // applyTheme(): swap to the currently-selected FLY_THEME on this fly.
+  // The body must be rebuilt because materials are baked into the meshes.
+  // Caller is expected to have set FLY_THEME (via setTheme()) first.
+  applyTheme() {
+    const parent = this.model.root.parent;
+    if (parent) parent.remove(this.model.root);
+    this.model = buildFlyModel();
+    this.model.root.scale.set(flyScaleCurrent, flyScaleCurrent, flyScaleCurrent);
+    if (parent) parent.add(this.model.root);
+  }
+
+  // applyScale(): re-apply the current flyScaleCurrent to this fly's root.
+  // land() and the initial build both read FLY_SCALE (the const initial
+  // value); this method is the runtime re-apply path.
+  applyScale() {
+    const s = flyScaleCurrent;
+    this.model.root.scale.set(s, s, s);
   }
 
   // Queue a body saccade instead of snapping the heading. Escape turns do NOT
@@ -476,6 +607,29 @@ export class Fly {
       this.heading += step;
       this.saccade -= step;
     }
+  }
+
+  // eatSugar: a sugar zone was consumed. Restore hunger (clamped at 1) and
+  // raise the eating transient so the brain state line shows 'eat' for
+  // EAT_DUR seconds. Spec: fly-satiety.
+  eatSugar() {
+    this.sugarLevel = Math.min(1, this.sugarLevel + SUGAR_REWARD);
+    this.eatingTimer = EAT_DUR;
+  }
+
+  // onMateClose: the renderer saw the fly within MATE_CLOSE_DIST of a mate.
+  // Raise courtingTimer; the brain state line shows 'court' for COURT_DUR.
+  onMateClose() {
+    this.courtingTimer = COURT_DUR;
+  }
+
+  // onPredatorProximity(d, range): set escapeTeach in [0, 1] as a function
+  // of distance to the closest predator. 0 at range, ~1 right on top.
+  // Spec: fly-predator-zones "Predator exposure teaches escape".
+  onPredatorProximity(d, range) {
+    if (d >= range) { this.escapeTeach = 0; return; }
+    const k = 1 - d / range;
+    this.escapeTeach = Math.min(1, k * k);
   }
 
   pickNextState() {
@@ -514,6 +668,13 @@ export class Fly {
 
     this.stateAge += dt;
     this.dartTimer = Math.max(0, this.dartTimer - dt);
+    this.eatingTimer = Math.max(0, this.eatingTimer - dt);
+    this.courtingTimer = Math.max(0, this.courtingTimer - dt);
+
+    // Satiety decay: sugarLevel -> 0 with tau = 60s. Spec: fly-satiety
+    // "Sugar level decays over time" — formula `sugarLevel *= exp(-dt/tau)`.
+    this.sugarLevel *= Math.exp(-dt / SUGAR_TAU);
+    if (this.sugarLevel < 1e-4) this.sugarLevel = 0;
 
     // live brain drives reach the wings even mid-flight
     this.brainLive = !!signals;
@@ -637,6 +798,17 @@ export class Fly {
   }
 
   updateWalk(dt, bounds) {
+    // Zone heading-bias is applied by the renderer (in frame(),
+    // before fly.update) so the bias is honoured in every fly
+    // state, not only `walking`. We used to apply the same bias
+    // here a second time at 3x strength; that double-applied
+    // during the walking state and ran at 0 strength in idle /
+    // flying. The renderer is now the only place the bias is
+    // computed, and the per-frame multiplier there is 1.0x
+    // (0.5x in flying) so the net heading displacement matches
+    // the old 3x in the walking state. Spec:
+    // fly-zone-heading-always-on.
+    // refresh the attached ledge from current terrain (windows move/close)
     // refresh the attached ledge from current terrain (windows move/close)
     if (this.ledge) {
       const cur = this.terrain.find((L) => L.id === this.ledge.id);
@@ -693,7 +865,10 @@ export class Fly {
   }
 
   applyAltitude() {
-    const s = FLY_SCALE * (1 + 0.8 * this.alt);
+    // Scale follows the user-facing flyScaleCurrent (which itself is
+    // FLY_SCALE * multiplier). The (1 + 0.8 * alt) term makes a flying
+    // fly grow up to 1.8x — independent of the user-chosen multiplier.
+    const s = flyScaleCurrent * (1 + 0.8 * this.alt);
     this.node.scale.set(s, s, s);
     this.node.position.z = 90 * this.alt;
   }

@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "name": "groom-trigger",
+  "description": "Stimulate grooming command (DNg11) — fly should switch to groom state for ~600 ms.",
+  "rationale": "DNg11 is the canonical grooming command. The sim drives a walk→groom hysteresis with a 0.4 s dwell guard. Stimulating DNg11 crosses the grooming threshold and the fly should rub its legs; useful for verifying the behavioral switch path before debugging more complex sequences.",
+  "indices": [9, 92, 117],
+  "strength": 0.3,
+  "durationMs": 500
+}

@@ -61,3 +61,67 @@ test('main.js forces dGPU via use-gl=egl + enable-gpu', () => {
   assert.match(src, /enable-gpu['"],\s*['"]1['"]/,
     'must not disable GPU');
 });
+
+// --- Phase A: fly appearance configurability (theme + size) ---
+
+test('main.js parses --fly-theme and --fly-size CLI flags', () => {
+  const src = readFileSync(main, 'utf8');
+  assert.match(src, /cfgFlyTheme/,
+    'main.js must have a cfgFlyTheme constant parsed from --fly-theme');
+  assert.match(src, /cfgFlySize/,
+    'main.js must have a cfgFlySize constant parsed from --fly-size');
+  assert.match(src, /--fly-theme/);
+  assert.match(src, /--fly-size/);
+});
+
+test('main.js broadcasts setTheme + setSize cmd to overlay windows', () => {
+  const src = readFileSync(main, 'utf8');
+  // Both the snapshot path and the runtime path must apply the look
+  // before the first frame paints.
+  assert.match(src, /name:\s*'setTheme'[^}]*theme:\s*cfgFlyTheme/s,
+    'must send setTheme cmd with cfgFlyTheme');
+  assert.match(src, /name:\s*'setSize'[^}]*size:\s*cfgFlySize/s,
+    'must send setSize cmd with cfgFlySize');
+});
+
+test('main.js tray exposes Theme and Size submenus', () => {
+  const src = readFileSync(main, 'utf8');
+  assert.match(src, /label:\s*'Theme'/,
+    'tray must have a Theme submenu');
+  assert.match(src, /label:\s*'Size'/,
+    'tray must have a Size submenu');
+  assert.match(src, /onSetTheme/,
+    'tray ctx must forward onSetTheme');
+  assert.match(src, /onSetSize/,
+    'tray ctx must forward onSetSize');
+});
+
+test('flymodel.js exports setTheme + setScale + 4 new themes', () => {
+  const flymodel = readFileSync(resolve(linux, '..', 'windows', 'src', 'flymodel.js'), 'utf8');
+  assert.match(flymodel, /export function setTheme/);
+  assert.match(flymodel, /export function setScale/);
+  assert.match(flymodel, /cyan:[\s\S]+?body:/, 'must define cyan theme');
+  assert.match(flymodel, /magenta:[\s\S]+?body:/, 'must define magenta theme');
+  assert.match(flymodel, /yellow:[\s\S]+?body:/, 'must define yellow theme');
+  assert.match(flymodel, /green:[\s\S]+?body:/, 'must define green theme');
+});
+
+test('overlay.js imports setTheme + setScale and handles cmd cases', () => {
+  const overlay = readFileSync(resolve(linux, '..', 'windows', 'renderer', 'overlay.js'), 'utf8');
+  assert.match(overlay, /setTheme,\s*setScale\s*\}\s*from\s*'..\/src\/flymodel\.js'/);
+  assert.match(overlay, /case\s*'setTheme'/);
+  assert.match(overlay, /case\s*'setSize'/);
+});
+
+// --- Phase C fix: onTerrain handler must guard against snap.windows === undefined
+// (regression for the "Cannot read properties of undefined (reading 'map')"
+// crash that fired when the Windows terrain-shape arrived on Linux without
+// the `windows` field — the steck trace pointed to preload.mjs:7 because the
+// listener was defined there, but the .map() call lives in overlay.js).
+
+test('overlay.js onTerrain handler guards against undefined snap.windows', () => {
+  const overlay = readFileSync(resolve(linux, '..', 'windows', 'renderer', 'overlay.js'), 'utf8');
+  // The fix wraps the call in Array.isArray() ? ... : [] before .map().
+  assert.match(overlay, /Array\.isArray\(snap\.windows\)\s*\?\s*snap\.windows\s*:\s*\[\]/,
+    'onTerrain must guard snap.windows with Array.isArray() before .map()');
+});
